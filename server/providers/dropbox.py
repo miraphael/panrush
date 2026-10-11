@@ -20,6 +20,7 @@ class DropboxProvider(PanProvider):
     id = "dropbox"
     name = "Dropbox"
     tier = "full"
+    oauth = True   # 支持一键授权向导
     root = ""
     cred_fields = [
         {"key": "client_id", "label": "app key", "placeholder": "Dropbox 应用 key", "secret": False},

@@ -19,6 +19,7 @@ class GDriveProvider(PanProvider):
     id = "gdrive"
     name = "Google Drive"
     tier = "full"
+    oauth = True   # 支持一键授权向导
     root = "root"
     cred_fields = [
         {"key": "client_id", "label": "client_id", "placeholder": "Google OAuth 客户端 ID", "secret": False},

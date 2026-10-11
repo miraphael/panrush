@@ -84,7 +84,9 @@ async function loadProviders() {
         <span class="badge ${p.tier}">${TIER_LABEL[p.tier] || p.tier}</span></div>
       <div class="actions">
         ${p.cred_fields.length ? `<button class="btn-cred">${p.cred_saved() ? "重新配置" : "配置凭据"}</button>` : ""}
+        ${p.oauth ? `<button class="btn-oauth">一键授权</button>` : ""}
         ${p.id !== "direct" ? `<button class="btn-open">浏览</button>` : ""}
+        ${p.id !== "direct" ? `<button class="btn-dav" title="DAV 地址: /dav/${p.id}/">DAV</button>` : ""}
       </div>
       <div class="pcred">
         <div class="help">${p.help || ""}</div>
@@ -96,6 +98,30 @@ async function loadProviders() {
     card.querySelector(".btn-cred")?.addEventListener("click", (e) => {
       e.stopPropagation();
       card.querySelector(".pcred").classList.toggle("open");
+    });
+    card.querySelector(".btn-oauth")?.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const values = {};
+      card.querySelectorAll(".pcred input").forEach(i => values[i.dataset.key] = i.value.trim());
+      if (!values.client_id) {
+        alert("请先在凭据表单里填 client_id（和 client_secret），再点一键授权");
+        card.querySelector(".pcred").classList.add("open");
+        return;
+      }
+      try {
+        const r = await api(`/api/oauth/${p.id}/start`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ client_id: values.client_id, client_secret: values.client_secret || "" }),
+        });
+        window.open(r.url);
+      } catch (err) { alert("发起授权失败：" + err.message); }
+    });
+    card.querySelector(".btn-dav")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const davUrl = `${location.origin}/dav/${p.id}/`;
+      navigator.clipboard?.writeText(davUrl).then(
+        () => alert("DAV 地址已复制：\n" + davUrl + "\n\n可直接挂到 rclone / 播放器（只读）"),
+        () => prompt("DAV 地址（只读）：", davUrl));
     });
     card.querySelector(".btn-save-cred")?.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -226,7 +252,7 @@ async function globalSearch() {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td class="sel-col"></td>
-      <td class="name">📄 ${escapeHtml(r.name)}<span class="dim"> · ${escapeHtml(r.provider_name)} · ${escapeHtml(r.path)}</span></td>
+      <td class="name">📄 ${escapeHtml(r.name)}${r.verified ? '<span class="ok"> ✓ 内容一致</span>' : ""}<span class="dim"> · ${escapeHtml(r.provider_name)} · ${escapeHtml(r.path)}</span></td>
       <td class="size-col">${fmtSize(r.size)}</td>
       <td class="act-col"><button class="primary dl-btn">下载</button></td>`;
     tr.querySelector(".dl-btn").addEventListener("click", () =>

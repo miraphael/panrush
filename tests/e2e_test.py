@@ -143,6 +143,32 @@ def main():
     assert "webdav" in provs, f"搜索未命中 WebDAV: {provs}"
     print(f"    ✓ 命中 {len(res['results'])} 个结果（provider: {sorted(provs)}）")
 
+    print("[8] 对外 WebDAV 出口 /dav/webdav/")
+    req = urllib.request.Request(PANRUSH + "/dav/webdav/", method="PROPFIND")
+    req.add_header("Depth", "1")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        assert r.status == 207
+        xml = r.read().decode()
+    assert "testdata.bin" in xml, f"DAV PROPFIND 缺少文件: {xml[:300]}"
+    print("    ✓ PROPFIND 207 列目录")
+    with urllib.request.urlopen(PANRUSH + "/dav/webdav/testdata.bin", timeout=60) as r:
+        data = r.read()
+    assert hashlib.sha256(data).hexdigest() == src_hash, "DAV 出口下载哈希不一致"
+    print("    ✓ 代理流下载哈希一致")
+    req = urllib.request.Request(PANRUSH + "/dav/webdav/testdata.bin")
+    req.add_header("Range", "bytes=0-1023")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        assert r.status == 206 and len(r.read()) == 1024, f"Range 透传异常: {r.status}"
+    print("    ✓ Range 透传 206")
+
+    print("[9] OAuth 向导（授权 URL 生成，无需网络）")
+    r = api("/api/oauth/gdrive/start", {"client_id": "fake-id", "client_secret": "fake-secret"})
+    assert r["url"].startswith("https://accounts.google.com/o/oauth2/v2/auth?"), r
+    assert "state=" in r["url"] and "redirect_uri" in r["url"]
+    r2 = api("/api/oauth/onedrive/start", {"client_id": "fake-id"})
+    assert "login.microsoftonline.com" in r2["url"]
+    print("    ✓ gdrive / onedrive 授权 URL 生成正常")
+
     api(f"/api/tasks/{t['id']}/delete", method="POST")
     api(f"/api/tasks/{t2['id']}/delete", method="POST")
     print("\n全部通过 ✓")

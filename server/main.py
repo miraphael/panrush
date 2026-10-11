@@ -4,22 +4,31 @@
 """
 
 import asyncio
+import hashlib
 import logging
 import os
+import secrets
 import sys
+import time
+from collections import Counter, defaultdict
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
+from urllib.parse import urlencode
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import __version__
 from .config import Config
 from .cred_store import CredStore
+from .dav import DavApp
 from .engine.downloader import Engine
 from .engine.task_store import TaskStore
 from .providers import PanError, _create_all
+from .providers.base import FileEntry
 
 # 冻结模式(PyInstaller)：数据/配置放 exe 旁边，web 资源在包内 _MEIPASS
 if getattr(sys, "frozen", False):
@@ -66,6 +75,7 @@ async def list_providers():
     return [{
         "id": p.id, "name": p.name, "tier": p.tier, "root": p.root,
         "cred_saved": p.cred_saved(), "cred_fields": p.cred_fields, "help": p.help,
+        "oauth": getattr(p, "oauth", None),
     } for p in providers.values()]
 
 
@@ -340,7 +350,8 @@ async def _scan_provider(p, q: str) -> list:
 
 @app.get("/api/search")
 async def search(q: str):
-    """跨盘搜索：在所有已配置网盘里按文件名子串查找（限速扫描，防风控）。"""
+    """跨盘搜索：在所有已配置网盘里按文件名子串查找（限速扫描，防风控）。
+    同名同大小的结果自动做 256KB 头部哈希比对，命中则标 verified=True。"""
     q = q.strip().lower()
     if not q:
         return {"results": []}
@@ -349,7 +360,42 @@ async def search(q: str):
     groups = await asyncio.gather(*scans, return_exceptions=True)
     results = [r for g in groups if isinstance(g, list) for r in g]
     results.sort(key=lambda r: (r["provider"], r["path"]))
+
+    # 哈希级验证：同名字节 + 同大小 → 比对文件头部 256KB
+    by_key = defaultdict(list)
+    for r in results:
+        if r["size"] > 0:
+            by_key[(r["name"], r["size"])].append(r)
+    for items in by_key.values():
+        if len(items) < 2 or len(items) > 4:
+            continue
+        hashes = await asyncio.gather(
+            *[_head_hash(providers[i["provider"]], i["fsid"], i["name"], i["size"])
+              for i in items],
+            return_exceptions=True,
+        )
+        ok = Counter(h for h in hashes if isinstance(h, str))
+        for r, h in zip(items, hashes):
+            if isinstance(h, str) and ok[h] >= 2:
+                r["verified"] = True
     return {"results": results}
+
+
+async def _head_hash(p, fsid: str, name: str, size: int) -> str:
+    """取文件头部 256KB 算 SHA256（验证跨盘副本是否同内容）。"""
+    link = await p.resolve(FileEntry(fsid=fsid, name=name, size=size, is_dir=False))
+    h = hashlib.sha256()
+    n = 0
+    async with httpx.AsyncClient(
+            follow_redirects=True, timeout=httpx.Timeout(15, read=30)) as cli:
+        async with cli.stream("GET", link.url, headers=link.headers) as r:
+            r.raise_for_status()
+            async for chunk in r.aiter_bytes(65536):
+                h.update(chunk)
+                n += len(chunk)
+                if n >= 256 * 1024:
+                    break
+    return h.hexdigest()
 
 
 # ---------- 检查更新 ----------
@@ -371,6 +417,90 @@ async def check_update():
     except Exception as e:
         raise HTTPException(502, f"检查更新失败: {e}")
 
+
+# ---------- OAuth 一键授权向导 ----------
+
+OAUTH_CONFIG = {
+    "onedrive": {
+        "auth": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+        "token": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+        "scope": "offline_access Files.Read.All",
+        "extra": {},
+        "secret_required": False,
+    },
+    "gdrive": {
+        "auth": "https://accounts.google.com/o/oauth2/v2/auth",
+        "token": "https://oauth2.googleapis.com/token",
+        "scope": "https://www.googleapis.com/auth/drive.readonly",
+        "extra": {"access_type": "offline", "prompt": "consent"},
+        "secret_required": True,
+    },
+    "dropbox": {
+        "auth": "https://www.dropbox.com/oauth2/authorize",
+        "token": "https://api.dropboxapi.com/oauth2/token",
+        "scope": "",
+        "extra": {"token_access_type": "offline"},
+        "secret_required": True,
+    },
+}
+_oauth_pending: dict = {}  # state -> {pid, client_id, client_secret}
+
+
+class OAuthStartBody(BaseModel):
+    client_id: str
+    client_secret: str = ""
+
+
+@app.post("/api/oauth/{pid}/start")
+async def oauth_start(pid: str, body: OAuthStartBody):
+    cfg = OAUTH_CONFIG.get(pid)
+    if not cfg:
+        raise HTTPException(404, "该驱动不支持 OAuth 向导")
+    if cfg["secret_required"] and not body.client_secret:
+        raise HTTPException(400, "该平台需要 client_secret")
+    state = secrets.token_urlsafe(16)
+    _oauth_pending[state] = {
+        "pid": pid, "client_id": body.client_id,
+        "client_secret": body.client_secret, "ts": time.time(),
+    }
+    redirect_uri = f"http://127.0.0.1:{config.port}/oauth/callback"
+    params = {"client_id": body.client_id, "redirect_uri": redirect_uri,
+              "response_type": "code", "state": state, **cfg["extra"]}
+    if cfg["scope"]:
+        params["scope"] = cfg["scope"]
+    return {"url": f"{cfg['auth']}?{urlencode(params)}"}
+
+
+@app.get("/oauth/callback")
+async def oauth_callback(request: Request):
+    params = dict(request.query_params)
+    pend = _oauth_pending.pop(params.get("state", ""), None)
+    if not pend or params.get("error"):
+        return HTMLResponse("<h2>✗ 授权失败或已超时，请回 PanRush 重试</h2>", status_code=400)
+    cfg = OAUTH_CONFIG[pend["pid"]]
+    redirect_uri = f"http://127.0.0.1:{config.port}/oauth/callback"
+    data = {"grant_type": "authorization_code", "code": params.get("code", ""),
+            "redirect_uri": redirect_uri,
+            "client_id": pend["client_id"], "client_secret": pend["client_secret"]}
+    async with httpx.AsyncClient(timeout=20) as cli:
+        r = await cli.post(cfg["token"], data=data)
+    tok = r.json()
+    if "refresh_token" not in tok:
+        return HTMLResponse(f"<h2>✗ 换取 token 失败</h2><pre>{tok}</pre>", status_code=400)
+    cred = {"client_id": pend["client_id"], "client_secret": pend["client_secret"],
+            "refresh_token": tok["refresh_token"]}
+    p = providers[pend["pid"]]
+    await p.login(cred)
+    cred_store.set(pid := pend["pid"], cred)
+    return HTMLResponse(
+        f"<body style='font-family:sans-serif;text-align:center;padding-top:15vh'>"
+        f"<h2>✓ {providers[pid].name} 授权成功</h2>"
+        f"<p>refresh_token 已加密保存，回到 PanRush 刷新页面即可浏览。</p>"
+        f"<p style='color:#888'>此窗口可以关闭</p></body>")
+
+
+# ---------- 对外 WebDAV 出口（在兜底静态挂载之前） ----------
+app.mount("/dav", DavApp(providers), name="dav")
 
 # 静态 Web UI（必须放最后：兜底路由，先于它的 API 路由优先匹配）
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

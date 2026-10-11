@@ -14,7 +14,9 @@
 - 🚦 **并发与限速**：全局令牌桶限速（KB/s）+ 同时下载任务数上限（排队等待），防风控
 - 📝 **冲突保护**：目标文件已存在自动改名 `file (1).ext`，绝不覆盖
 - 🔔 **任务体验**：浏览器完成通知、任务过滤器、ETA 剩余时间、实时速度曲线
-- 🔍 **跨盘搜索**：一个搜索框扫所有已配置网盘，结果一键下载（限速扫描防风控）
+- 🔍 **跨盘搜索**：一个搜索框扫所有已配置网盘，同名字节结果自动做 **256KB 头部哈希比对**，标注"✓ 内容一致"
+- 🌉 **对外 WebDAV 出口**：`http://127.0.0.1:18400/dav/{盘}/` 直接挂到 rclone / 播放器 / 资源管理器（只读，代理流转发，支持 Range）
+- 🔑 **OAuth 一键授权**：OneDrive / Google Drive / Dropbox 填好 client_id 点一下即完成授权，不用手动搞 refresh_token
 - 📥 **批量下载**：文件浏览复选框多选、一键下载所选；一键清理已完成任务
 - 🔄 **检查更新**：对接 GitHub Releases，点击版本号即查
 - 🖥️ **完整桌面软件规格**：系统托盘常驻、开机自启、下载完成后自动关机/睡眠、滚动日志（data/panrush.log）
@@ -106,16 +108,22 @@ class MyPanProvider(PanProvider):
 python tests/range_server.py 8765 tests      # 直链测试服务器（含 Range 支持）
 python tests/dav_server.py 8766 tests        # WebDAV 测试服务器（PROPFIND + Range）
 python -m uvicorn server.main:app --port 18400 &
-python tests/e2e_test.py                     # 7 节：分段/续传/冲突/并发/WebDAV/跨盘搜索
+python tests/e2e_test.py                     # 9 节：分段/续传/冲突/并发/WebDAV/搜索/DAV出口/OAuth
+```
+
+### 挂载 WebDAV 出口
+
+```
+rclone config → 类型 webdav → url: http://127.0.0.1:18400/dav/quark/   # 任意已配置凭据的盘
+# 播放器、资源管理器同理；只读，直链代理流转发
 ```
 
 ## 🗺️ Roadmap
 
 - [ ] MEGA 驱动（AES+RSA 会话加密，需专项实现）
 - [ ] 迅雷 / UC 网盘 / 115 驱动（签名类接口，需专项）
-- [ ] 对外 WebDAV 出口（把聚合盘挂给播放器 / rclone）
-- [ ] 凭据内置引导（OAuth 授权页一键跳转，免去手动开控制台）
-- [ ] 跨盘搜索哈希级匹配（同名同大小 → 内容比对）
+- [ ] 跨盘搜索哈希级匹配升级为全文件秒传比对
+- [ ] DAV 出口支持写入（上传）与鉴权
 - [ ] Linux / macOS 打包
 
 ## ⚖️ 使用声明

@@ -21,6 +21,7 @@ class OneDriveProvider(PanProvider):
     id = "onedrive"
     name = "OneDrive"
     tier = "full"
+    oauth = True   # 支持一键授权向导
     root = ""
     cred_fields = [
         {"key": "client_id", "label": "client_id", "placeholder": "Azure 应用 ID", "secret": False},
