@@ -4,7 +4,7 @@ import os
 DEFAULTS = {
     "host": "127.0.0.1",
     "port": 18400,
-    "dest_dir": os.path.join(os.path.expanduser("~"), "Downloads", "PanHub"),
+    "dest_dir": os.path.join(os.path.expanduser("~"), "Downloads", "PanRush"),
     "conns_per_task": 16,
     "min_segment_mb": 16,
     "global_speed_limit_kbps": 0,  # 0 = 不限
