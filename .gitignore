@@ -5,7 +5,7 @@ data/
 *.db-shm
 
 # 用户配置
-server/config.json
+config.json
 
 # 测试产物
 tests/testdata.bin
