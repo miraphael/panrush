@@ -160,12 +160,14 @@ async def task_action(task_id: str, action: str):
 @app.post("/api/config")
 async def save_config(request: Request):
     body = await request.json()
-    for k in ("dest_dir", "conns_per_task", "global_speed_limit_kbps"):
+    for k in ("dest_dir", "conns_per_task", "max_concurrent_tasks", "global_speed_limit_kbps"):
         if k in body:
             config.data[k] = body[k]
     config.save()
     if "global_speed_limit_kbps" in body:
         engine.limiter.set_rate(int(body["global_speed_limit_kbps"]))
+    if "max_concurrent_tasks" in body:
+        engine.slots.set_limit(int(body["max_concurrent_tasks"]))
     return config.data
 
 

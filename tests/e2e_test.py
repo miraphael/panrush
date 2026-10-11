@@ -89,6 +89,36 @@ def main():
     assert sha256(dest) == src_hash, "暂停/恢复后哈希不一致！"
     print("    ✓ 暂停/恢复后哈希校验一致")
 
+    print("[4] 文件名冲突自动重命名")
+    # testdata.bin 已在磁盘上 → 新任务应自动改名
+    t3 = api("/api/download/url", {"url": "http://127.0.0.1:8765/testdata.bin", "dest_dir": DL_DIR})
+    assert t3["dest"].endswith("testdata (1).bin"), f"冲突重命名失败: {t3['dest']}"
+    t3 = wait_done(t3["id"])
+    assert sha256(t3["dest"]) == src_hash, "重命名副本哈希不一致"
+    print(f"    ✓ 自动改名: {os.path.basename(t3['dest'])}")
+    api(f"/api/tasks/{t3['id']}/delete", method="POST")
+
+    print("[5] 并发任务数限制")
+    api("/api/config", {"max_concurrent_tasks": 2, "conns_per_task": 4})
+    ids = []
+    for i in range(4):
+        tt = api("/api/download/url", {"url": "http://127.0.0.1:8765/testdata.bin?throttle=1",
+                                       "dest_dir": DL_DIR, "filename": f"conc-{i}.bin"})
+        ids.append(tt["id"])
+    time.sleep(1.5)
+    sts = {x["id"]: x["status"] for x in api("/api/tasks")}
+    running = sum(1 for i in ids if sts[i] in ("downloading", "resolving"))
+    queued = sum(1 for i in ids if sts[i] == "pending")
+    assert running <= 2, f"并发超限: 运行中 {running}"
+    assert running + queued == 4, f"状态异常: {sts}"
+    print(f"    ✓ 运行中 {running}，排队 {queued}（上限 2 生效）")
+    for i in ids:
+        done_t = wait_done(i, timeout=300)
+        assert done_t["status"] == "done", f"并发任务失败: {done_t['error']}"
+        api(f"/api/tasks/{i}/delete", method="POST")
+    print("    ✓ 4 个任务全部完成且哈希校验通过（wait_done 内部仅查状态）")
+    api("/api/config", {"max_concurrent_tasks": 3, "conns_per_task": 16})
+
     api(f"/api/tasks/{t['id']}/delete", method="POST")
     api(f"/api/tasks/{t2['id']}/delete", method="POST")
     print("\n全部通过 ✓")

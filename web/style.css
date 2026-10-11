@@ -12,7 +12,8 @@ header h1 span { color: var(--accent); }
 header .ver { color: var(--dim); font-size: 12px; }
 .quick { flex: 1; display: flex; gap: 8px; }
 .quick input { flex: 1; }
-.total-speed { color: var(--green); font-variant-numeric: tabular-nums; min-width: 90px; text-align: right; }
+.total-speed { color: var(--green); font-variant-numeric: tabular-nums; min-width: 200px; text-align: right; display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+#speed-chart { background: rgba(52,199,123,.06); border-radius: 4px; }
 
 input, button { background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font: inherit; outline: none; }
 input:focus { border-color: var(--accent); }
@@ -65,6 +66,9 @@ td.name.dir { color: var(--accent); }
 .empty { color: var(--dim); text-align: center; padding: 30px 0; }
 
 #tasks-pane { background: var(--panel); border-left: 1px solid var(--border); padding: 12px; }
+#task-filters { display: flex; gap: 6px; margin-bottom: 10px; }
+.ftab { font-size: 12px; padding: 3px 10px; }
+.ftab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .task { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-bottom: 8px; }
 .task .trow { display: flex; justify-content: space-between; gap: 8px; }
 .task .tname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

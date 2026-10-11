@@ -58,8 +58,43 @@ class RateLimiter:
                 await asyncio.sleep(min(deficit, 0.25))
 
 
+class SlotPool:
+    """可动态调整大小的并发槽位（限制同时下载的任务数）。"""
+
+    def __init__(self, n: int):
+        self.n = max(1, n)
+        self.used = 0
+        self._cond = asyncio.Condition()
+
+    def set_limit(self, n: int):
+        self.n = max(1, n)
+
+    async def acquire(self):
+        async with self._cond:
+            while self.used >= self.n:
+                await self._cond.wait()
+            self.used += 1
+
+    async def release(self):
+        async with self._cond:
+            self.used = max(0, self.used - 1)
+            self._cond.notify_all()
+
+
 def _sanitize(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', "_", name).strip() or "download.bin"
+
+
+def _unique_path(dest: str) -> str:
+    """目标文件已存在时自动改名: file (1).ext / file (2).ext …"""
+    if not os.path.exists(dest):
+        return dest
+    base, ext = os.path.splitext(dest)
+    for i in range(1, 1000):
+        cand = f"{base} ({i}){ext}"
+        if not os.path.exists(cand):
+            return cand
+    return dest
 
 
 def _filename_from_headers(headers: dict, url: str) -> str:
@@ -79,6 +114,7 @@ class Engine:
         self.tasks: dict[str, Task] = {}
         self.http = httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(20, read=120))
         self.limiter = RateLimiter(getattr(config, "global_speed_limit_kbps", 0))
+        self.slots = SlotPool(getattr(config, "max_concurrent_tasks", 3))
         self._link_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._running: dict[str, asyncio.Task] = {}
         self._reporter: asyncio.Task | None = None
@@ -103,7 +139,8 @@ class Engine:
     def create(self, provider_id: str, fsid: str, name: str, size: int, dest_dir: str = "") -> Task:
         dest_dir = dest_dir or self.config.dest_dir
         t = Task(provider_id=provider_id, fsid=str(fsid), name=_sanitize(name), size=size)
-        t.dest = os.path.join(dest_dir, t.name)
+        t.dest = _unique_path(os.path.join(dest_dir, t.name))
+        t.name = os.path.basename(t.dest)
         self.store.save(t)
         self.tasks[t.id] = t
         self._spawn(t)
@@ -190,45 +227,11 @@ class Engine:
 
     async def _worker(self, t: Task):
         try:
-            t.status = "resolving"
-            self.store.save(t)
-            url, headers = await self._get_link(t, force=True)
-
-            # 探测：大小 / 是否支持 Range / 真实文件名
-            probe_headers = dict(headers)
-            probe_headers["Range"] = "bytes=0-"
-            size, ranged = -1, False
-            async with self.http.stream("GET", url, headers=probe_headers) as r:
-                if r.status_code not in (200, 206):
-                    r.raise_for_status()
-                cr = r.headers.get("content-range", "")
-                cl = r.headers.get("content-length", "")
-                if r.status_code == 206 and cr:
-                    size = int(cr.rsplit("/", 1)[-1])
-                    ranged = True
-                elif cl:
-                    size = int(cl)
-                if not t.name or t.name == "download.bin":
-                    t.name = _sanitize(_filename_from_headers(r.headers, str(r.url)))
-                    t.dest = os.path.join(os.path.dirname(t.dest), t.name)
-            if size == 0:
-                raise ValueError("文件大小为 0")
-            if size > 0:
-                t.size = size
-            self.store.save(t)
-
-            os.makedirs(os.path.dirname(t.dest) or ".", exist_ok=True)
-
-            if ranged and size >= self.config.min_segment_mb * 1024 * 1024 // 2:
-                await self._download_segmented(t)
-            else:
-                await self._download_single(t, url, headers, ranged)
-
-            if t.size > 0 and t.done != t.size:
-                raise ValueError(f"校验失败：已下 {t.done}/{t.size}")
-            t.status = "done"
-            t.speed = 0
-            self.store.save(t)
+            await self.slots.acquire()  # 超出并发上限的任务在这里排队（状态保持 pending）
+            try:
+                await self._run_task(t)
+            finally:
+                await self.slots.release()
         except Paused:
             t.status = "paused"
             t.speed = 0
@@ -240,6 +243,47 @@ class Engine:
             t.error = f"{type(e).__name__}: {e}"
             t.speed = 0
             self.store.save(t)
+
+    async def _run_task(self, t: Task):
+        t.status = "resolving"
+        self.store.save(t)
+        url, headers = await self._get_link(t, force=True)
+
+        # 探测：大小 / 是否支持 Range / 真实文件名
+        probe_headers = dict(headers)
+        probe_headers["Range"] = "bytes=0-"
+        size, ranged = -1, False
+        async with self.http.stream("GET", url, headers=probe_headers) as r:
+            if r.status_code not in (200, 206):
+                r.raise_for_status()
+            cr = r.headers.get("content-range", "")
+            cl = r.headers.get("content-length", "")
+            if r.status_code == 206 and cr:
+                size = int(cr.rsplit("/", 1)[-1])
+                ranged = True
+            elif cl:
+                size = int(cl)
+            if not t.name or t.name == "download.bin":
+                t.name = _sanitize(_filename_from_headers(r.headers, str(r.url)))
+                t.dest = os.path.join(os.path.dirname(t.dest), t.name)
+        if size == 0:
+            raise ValueError("文件大小为 0")
+        if size > 0:
+            t.size = size
+        self.store.save(t)
+
+        os.makedirs(os.path.dirname(t.dest) or ".", exist_ok=True)
+
+        if ranged and size >= self.config.min_segment_mb * 1024 * 1024 // 2:
+            await self._download_segmented(t)
+        else:
+            await self._download_single(t, url, headers, ranged)
+
+        if t.size > 0 and t.done != t.size:
+            raise ValueError(f"校验失败：已下 {t.done}/{t.size}")
+        t.status = "done"
+        t.speed = 0
+        self.store.save(t)
 
     # ---------- 分段并发下载 ----------
 

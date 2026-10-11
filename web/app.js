@@ -9,6 +9,41 @@ const crumbs = [];           // [{label, path}]
 
 const TIER_LABEL = { full: "满速", limited: "受限", experimental: "计划中" };
 
+let taskFilter = "all";
+const prevStatus = {};   // 任务完成通知用：id -> 上次状态
+let speedHist = [];      // 总速度历史（秒），画曲线用
+
+// 浏览器通知需要用户手势授权一次
+document.addEventListener("click", () => {
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
+  }
+}, { once: true });
+
+function notifyDone(t) {
+  if ("Notification" in window && Notification.permission === "granted") {
+    try {
+      new Notification("PanRush · 下载完成 ✓", { body: t.name });
+    } catch {}
+  }
+}
+
+function drawSpeedChart() {
+  const cv = $("#speed-chart"), ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if (speedHist.length < 2) return;
+  const max = Math.max(...speedHist, 1);
+  ctx.beginPath();
+  ctx.strokeStyle = "#34c77b";
+  ctx.lineWidth = 1.5;
+  speedHist.forEach((v, i) => {
+    const x = i * cv.width / (speedHist.length - 1);
+    const y = cv.height - 2 - (v / max) * (cv.height - 4);
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+}
+
 async function api(path, opts) {
   const r = await fetch(path, opts);
   if (!r.ok) {
@@ -147,11 +182,30 @@ async function pollTasks() {
   let tasks;
   try { tasks = await api("/api/tasks"); } catch { return; }
   const total = tasks.filter(t => t.status === "downloading").reduce((s, t) => s + t.speed, 0);
-  $("#total-speed").textContent = fmtSpeed(total);
+  $("#total-speed-text").textContent = fmtSpeed(total);
+  speedHist.push(total);
+  if (speedHist.length > 60) speedHist.shift();
+  drawSpeedChart();
+
+  // 完成通知
+  for (const t of tasks) {
+    if (t.status === "done" && prevStatus[t.id] && prevStatus[t.id] !== "done") notifyDone(t);
+    prevStatus[t.id] = t.status;
+  }
+
+  const filtered = tasks.filter(t => {
+    if (taskFilter === "active") return ["pending", "resolving", "downloading", "paused"].includes(t.status);
+    if (taskFilter === "done") return t.status === "done";
+    if (taskFilter === "error") return t.status === "error";
+    return true;
+  });
 
   const box = $("#task-list");
   box.innerHTML = "";
-  for (const t of tasks) {
+  if (!filtered.length) {
+    box.innerHTML = `<div class="empty">没有${{all:"",active:"进行中的",done:"已完成的",error:"失败的"}[taskFilter] || ""}任务</div>`;
+  }
+  for (const t of filtered) {
     const div = document.createElement("div");
     div.className = `task ${t.status}`;
     const STATUS = { pending: "等待", resolving: "取直链", downloading: "下载中",
@@ -197,6 +251,11 @@ async function loadConfig() {
   const c = await api("/api/config");
   $("#cfg-dest").value = c.dest_dir;
   $("#cfg-conns").value = c.conns_per_task;
+  $("#cfg-tasks").value = c.max_concurrent_tasks;
+  $("#cfg-limit").value = c.global_speed_limit_kbps || 0;
+  api("/api/version").then(v => {
+    $("#ver").textContent = `v${v.version}`;
+  }).catch(() => {});
 }
 
 async function saveConfig() {
@@ -230,6 +289,13 @@ $("#cfg-open").addEventListener("click", async () => {
 });
 $("#pause-all").addEventListener("click", () => api("/api/tasks-all/pause", { method: "POST" }).then(pollTasks));
 $("#resume-all").addEventListener("click", () => api("/api/tasks-all/resume", { method: "POST" }).then(pollTasks));
+
+document.querySelectorAll(".ftab").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".ftab").forEach(x => x.classList.remove("active"));
+  b.classList.add("active");
+  taskFilter = b.dataset.f;
+  pollTasks();
+}));
 
 loadProviders().then(loadConfig);
 pollTasks();

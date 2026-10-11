@@ -1,0 +1,9 @@
+{
+  "host": "127.0.0.1",
+  "port": 18400,
+  "dest_dir": "C:\\Users\\Administrator\\Downloads\\PanRush",
+  "conns_per_task": 16,
+  "min_segment_mb": 16,
+  "max_concurrent_tasks": 3,
+  "global_speed_limit_kbps": 0
+}

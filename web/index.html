@@ -14,7 +14,7 @@
     <input id="quick-url" placeholder="粘贴任意 HTTP(S) 直链，回车直接下载…">
     <button id="quick-btn">直链下载</button>
   </div>
-  <div class="total-speed" id="total-speed">0 B/s</div>
+  <div class="total-speed"><canvas id="speed-chart" width="120" height="26"></canvas> <span id="total-speed-text">0 B/s</span></div>
 </header>
 
 <main>
@@ -25,6 +25,7 @@
       <h2>设置</h2>
       <label>下载目录<br><input id="cfg-dest" type="text"></label>
       <label>单任务连接数<br><input id="cfg-conns" type="number" min="1" max="64"></label>
+      <label>同时下载任务数<br><input id="cfg-tasks" type="number" min="1" max="20"></label>
       <label>全局限速 KB/s（0=不限）<br><input id="cfg-limit" type="number" min="0"></label>
       <button id="cfg-save">保存设置</button>
       <button id="cfg-open">打开下载目录</button>
@@ -49,6 +50,12 @@
       <button id="pause-all" class="mini">全部暂停</button>
       <button id="resume-all" class="mini">全部继续</button>
     </h2>
+    <div id="task-filters">
+      <button class="ftab active" data-f="all">全部</button>
+      <button class="ftab" data-f="active">进行中</button>
+      <button class="ftab" data-f="done">已完成</button>
+      <button class="ftab" data-f="error">失败</button>
+    </div>
     <div id="task-list"></div>
   </section>
 </main>
