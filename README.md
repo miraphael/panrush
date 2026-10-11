@@ -8,6 +8,7 @@
 
 - 🧩 **驱动插件化**：每个网盘一个驱动文件，几十行即可接入新盘
 - 🚀 **分段下载引擎**：大文件自动分段并发（默认 16 连接，可配），按偏移直接写入目标文件
+- 🐢 **全局限速**：令牌桶限速（KB/s），所有任务共享，防止触发网盘风控
 - 🔄 **短时效直链适配**：夸克等直链几十秒过期 → 引擎"即取即下"，401/403/410 自动重取，**分段进度不丢**
 - ⏸️ **断点续传**：分段进度每秒落 SQLite，暂停 / 重启 / 崩溃后接着下
 - 🔐 **凭据安全**：Cookie / token 经 Windows DPAPI 加密后才落盘
@@ -29,6 +30,12 @@
 
 ## 🚀 快速开始
 
+**方式一：绿色版 exe（Windows，推荐）**
+
+从 [Releases](https://github.com/miraphael/panrush/releases) 下载 `PanRush.exe`，双击即用（自动打开浏览器，数据保存在 exe 同目录）。
+
+**方式二：源码运行**
+
 ```bash
 # 1. 安装依赖（Python 3.10+）
 pip install -r requirements.txt
@@ -42,6 +49,14 @@ http://127.0.0.1:18400
 ```
 
 首次使用：左侧选择网盘 → 点「配置凭据」→ 按提示填入 Cookie / 开放平台凭据 → 浏览 → 点文件旁的「下载」。
+
+### 自行打包 exe
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --noconsole --name PanRush --add-data "web;web" run_exe.py
+# 产物在 dist/PanRush.exe
+```
 
 ## 🏗️ 架构
 

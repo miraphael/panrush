@@ -174,10 +174,6 @@ async def get_config():
     return config.data
 
 
-# 静态 Web UI（放最后，兜底路由）
-app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
-
-
 # ---------- 扩展操作 ----------
 
 @app.get("/api/version")
@@ -223,3 +219,7 @@ async def resume_all():
         if t.status in ("paused", "error"):
             engine.resume(tid)
     return {"ok": True}
+
+
+# 静态 Web UI（必须放最后：兜底路由，先于它的 API 路由优先匹配）
+app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
