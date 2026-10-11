@@ -8,6 +8,7 @@ import time
 import httpx
 
 from .base import DirectLink, FileEntry, PanError, PanProvider, register
+from . import HTTP, HTTP_NO_REDIRECT
 
 BASE = "https://open-api.123pan.com"
 
@@ -34,7 +35,7 @@ class Pan123Provider(PanProvider):
             c = self.cred
             if not c:
                 raise PanError("未配置凭据")
-            async with httpx.AsyncClient(timeout=20) as cli:
+            async with HTTP as cli:
                 r = await cli.post(f"{BASE}/api/v1/access_token",
                                    json={"clientID": c["client_id"], "clientSecret": c["client_secret"]})
             data = r.json()
@@ -45,7 +46,7 @@ class Pan123Provider(PanProvider):
         return {"Platform": "open_platform", "Authorization": f"Bearer {self._token}"}
 
     async def login(self, cred: dict) -> dict:
-        async with httpx.AsyncClient(timeout=20) as cli:
+        async with HTTP as cli:
             r = await cli.post(f"{BASE}/api/v1/access_token",
                                json={"clientID": cred["client_id"], "clientSecret": cred["client_secret"]})
         data = r.json()
@@ -57,7 +58,7 @@ class Pan123Provider(PanProvider):
         headers = await self._auth_headers()
         parent = int(path or 0)
         entries, last_file_id = [], None
-        async with httpx.AsyncClient(timeout=30) as cli:
+        async with HTTP as cli:
             for _ in range(50):  # 防御性分页上限
                 params = {"parentFileId": parent, "limit": 100}
                 if last_file_id is not None:
@@ -78,7 +79,7 @@ class Pan123Provider(PanProvider):
 
     async def resolve(self, entry) -> DirectLink:
         headers = await self._auth_headers()
-        async with httpx.AsyncClient(timeout=30) as cli:
+        async with HTTP as cli:
             r = await cli.post(f"{BASE}/upload/v1/file/download_info",
                                json={"fileId": int(entry.fsid)}, headers=headers)
         data = r.json()

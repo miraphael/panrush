@@ -10,6 +10,7 @@ from urllib.parse import quote
 import httpx
 
 from .base import DirectLink, FileEntry, PanError, PanProvider, register
+from . import HTTP, HTTP_NO_REDIRECT
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
@@ -39,7 +40,7 @@ class GDriveProvider(PanProvider):
         c = self.cred
         if not c:
             raise PanError("未配置凭据")
-        async with httpx.AsyncClient(timeout=20) as cli:
+        async with HTTP as cli:
             r = await cli.post("https://oauth2.googleapis.com/token", data={
                 "grant_type": "refresh_token",
                 "refresh_token": c["refresh_token"],
@@ -67,7 +68,7 @@ class GDriveProvider(PanProvider):
         entries = []
         url = f"https://www.googleapis.com/drive/v3/files?q={q}&pageSize=200" \
               "&fields=nextPageToken,files(id,name,size,mimeType)&orderBy=folder,name"
-        async with httpx.AsyncClient(timeout=30) as cli:
+        async with HTTP as cli:
             while url:
                 r = await cli.get(url, headers=headers)
                 if r.status_code == 401:

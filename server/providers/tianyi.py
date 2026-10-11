@@ -7,6 +7,7 @@
 import httpx
 
 from .base import DirectLink, FileEntry, PanError, PanProvider, register
+from . import HTTP, HTTP_NO_REDIRECT
 
 BASE = "https://cloud.189.cn"
 
@@ -30,7 +31,7 @@ class TianyiProvider(PanProvider):
         return {"Cookie": c["cookie"], "Referer": f"{BASE}/", "User-Agent": "Mozilla/5.0"}
 
     async def login(self, cred: dict) -> dict:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as cli:
+        async with HTTP as cli:
             r = await cli.get(f"{BASE}/api/portal/getUserinfo.action",
                               headers={"Cookie": cred["cookie"], "Referer": f"{BASE}/",
                                        "User-Agent": "Mozilla/5.0"})
@@ -48,7 +49,7 @@ class TianyiProvider(PanProvider):
         folder_id = path or self.root
         entries = []
         headers = self._headers()
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cli:
+        async with HTTP as cli:
             for page in range(1, 100):
                 r = await cli.get(f"{BASE}/api/portal/listFiles.action", headers=headers, params={
                     "folderId": folder_id, "pageNum": page, "pageSize": 100,
@@ -76,7 +77,7 @@ class TianyiProvider(PanProvider):
 
     async def resolve(self, entry) -> DirectLink:
         headers = self._headers()
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cli:
+        async with HTTP as cli:
             r = await cli.get(f"{BASE}/api/portal/getFileDownloadUrl.action",
                               headers=headers, params={"fileId": entry.fsid})
         data = r.json()

@@ -11,6 +11,7 @@ from urllib.parse import quote
 import httpx
 
 from .base import DirectLink, FileEntry, PanError, PanProvider, register
+from . import HTTP, HTTP_NO_REDIRECT
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
@@ -49,7 +50,7 @@ class OneDriveProvider(PanProvider):
         }
         if c.get("client_secret"):
             body["client_secret"] = c["client_secret"]
-        async with httpx.AsyncClient(timeout=20) as cli:
+        async with HTTP as cli:
             r = await cli.post(TOKEN_URL, data=body)
         data = r.json()
         if "access_token" not in data:
@@ -64,7 +65,7 @@ class OneDriveProvider(PanProvider):
     async def _drive_id(self) -> str:
         if self._drive_id:
             return self._drive_id
-        async with httpx.AsyncClient(timeout=20) as cli:
+        async with HTTP as cli:
             r = await cli.get(f"{GRAPH}/me/drive", headers=await self._headers())
         if r.status_code == 401:
             self._token, self._token_exp = "", 0
@@ -85,7 +86,7 @@ class OneDriveProvider(PanProvider):
         base = f"{GRAPH}/drives/{drive}/root"
         url = f"{base}/children" if not path else f"{base}:/{quote(path)}:/children"
         entries = []
-        async with httpx.AsyncClient(timeout=30) as cli:
+        async with HTTP as cli:
             while url:
                 r = await cli.get(url, headers=headers)
                 if r.status_code == 401:
@@ -104,7 +105,7 @@ class OneDriveProvider(PanProvider):
     async def resolve(self, entry) -> DirectLink:
         headers = await self._headers()
         drive = await self._drive_id()
-        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as cli:
+        async with HTTP_NO_REDIRECT as cli:
             r = await cli.get(f"{GRAPH}/drives/{drive}/items/{entry.fsid}/content", headers=headers)
         if r.status_code in (301, 302, 307):
             url = r.headers["location"]

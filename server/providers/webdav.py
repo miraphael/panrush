@@ -7,6 +7,7 @@ from urllib.parse import quote
 import httpx
 
 from .base import DirectLink, FileEntry, PanError, PanProvider, register
+from . import HTTP, HTTP_NO_REDIRECT
 
 DAV = "{DAV:}"
 
@@ -38,7 +39,7 @@ class WebDAVProvider(PanProvider):
 
     async def login(self, cred: dict) -> dict:
         url = cred["base_url"].rstrip("/") + "/"
-        async with httpx.AsyncClient(timeout=20) as cli:
+        async with HTTP as cli:
             r = await cli.request(
                 "PROPFIND", url,
                 headers={"Authorization": _basic_auth(cred.get("username", ""), cred.get("password", "")),
@@ -54,7 +55,7 @@ class WebDAVProvider(PanProvider):
         path = path or "/"
         body = ('<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop>'
                 "<d:displayname/><d:getcontentlength/><d:resourcetype/></d:prop></d:propfind>")
-        async with httpx.AsyncClient(timeout=30) as cli:
+        async with HTTP as cli:
             r = await cli.request("PROPFIND", self._url(path), headers={**self._headers(), "Depth": "1"}, content=body)
         if r.status_code >= 400:
             raise PanError(f"PROPFIND HTTP {r.status_code}")

@@ -27,7 +27,7 @@ from .cred_store import CredStore
 from .dav import DavApp
 from .engine.downloader import Engine
 from .engine.task_store import TaskStore
-from .providers import PanError, _create_all
+from .providers import HTTP, HTTP_NO_REDIRECT, PanError, _create_all
 from .providers.base import FileEntry
 
 # 冻结模式(PyInstaller)：数据/配置放 exe 旁边，web 资源在包内 _MEIPASS
@@ -97,31 +97,50 @@ async def save_cred(pid: str, body: CredBody):
     except PanError as e:
         raise HTTPException(400, str(e))
     cred_store.set(pid, body.values)
+    _invalidate_fs_cache(pid)
     return {"ok": True}
 
 
 @app.delete("/api/providers/{pid}/cred")
 async def del_cred(pid: str):
     cred_store.delete(pid)
+    _invalidate_fs_cache(pid)
     return {"ok": True}
 
 
 # ---------- 文件浏览 ----------
 
+_fs_cache: dict = {}  # (pid, path) -> (ts, payload)；列目录 API 调用慢，30s 缓存是响应速度关键
+
+
+def _invalidate_fs_cache(pid: str | None = None):
+    if pid is None:
+        _fs_cache.clear()
+    else:
+        for k in [k for k in _fs_cache if k[0] == pid]:
+            _fs_cache.pop(k, None)
+
+
 @app.get("/api/fs")
-async def browse(provider: str, path: str = ""):
+async def browse(provider: str, path: str = "", refresh: int = 0):
     p = providers.get(provider)
     if not p:
         raise HTTPException(404, "provider 不存在")
     if not p.cred_saved():
         raise HTTPException(400, f"{p.name} 未配置凭据")
+    key = (provider, path or p.root)
+    ts, cached = _fs_cache.get(key, (0.0, None))
+    if not refresh and cached is not None and time.time() - ts < 30:
+        return cached
     try:
         entries = await p.list_dir(path or p.root)
     except PanError as e:
         raise HTTPException(400, str(e))
-    return {"path": path or p.root, "entries": [
+    payload = {"path": path or p.root, "entries": [
         {"fsid": e.fsid, "name": e.name, "size": e.size, "is_dir": e.is_dir} for e in entries
     ]}
+    _fs_cache[key] = (time.time(), payload)
+    return payload
 
 
 # ---------- 任务 ----------
@@ -386,8 +405,7 @@ async def _head_hash(p, fsid: str, name: str, size: int) -> str:
     link = await p.resolve(FileEntry(fsid=fsid, name=name, size=size, is_dir=False))
     h = hashlib.sha256()
     n = 0
-    async with httpx.AsyncClient(
-            follow_redirects=True, timeout=httpx.Timeout(15, read=30)) as cli:
+    async with HTTP as cli:
         async with cli.stream("GET", link.url, headers=link.headers) as r:
             r.raise_for_status()
             async for chunk in r.aiter_bytes(65536):
@@ -404,7 +422,7 @@ async def _head_hash(p, fsid: str, name: str, size: int) -> str:
 async def check_update():
     import httpx
     try:
-        async with httpx.AsyncClient(timeout=10) as cli:
+        async with HTTP as cli:
             r = await cli.get("https://api.github.com/repos/miraphael/panrush/releases/latest",
                               headers={"Accept": "application/vnd.github+json"})
         if r.status_code == 404:
@@ -482,7 +500,7 @@ async def oauth_callback(request: Request):
     data = {"grant_type": "authorization_code", "code": params.get("code", ""),
             "redirect_uri": redirect_uri,
             "client_id": pend["client_id"], "client_secret": pend["client_secret"]}
-    async with httpx.AsyncClient(timeout=20) as cli:
+    async with HTTP as cli:
         r = await cli.post(cfg["token"], data=data)
     tok = r.json()
     if "refresh_token" not in tok:

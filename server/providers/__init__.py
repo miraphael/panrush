@@ -1,8 +1,30 @@
-"""驱动注册表：import 本包即完成全部注册。"""
+"""驱动注册表：import 本包即完成全部注册。
+
+HTTP / HTTP_NO_REDIRECT 是全驱动共享的连接池（keep-alive），
+避免每次列目录/取直链都重新建立 TCP+TLS——这是"浏览反应慢"的主要病根。
+"""
 
 import httpx
 
 from .base import PanError, PanProvider, DirectLink, FileEntry, REGISTRY
+
+class SharedClient(httpx.AsyncClient):
+    """常驻共享客户端：允许 `async with HTTP as cli:` 写法但进入/退出都不改变状态。
+
+    驱动代码原本都是 `async with httpx.AsyncClient(...)` 的临时客户端风格，
+    统一改共享池时保留该写法，靠这个子类保证连接池不被误关/误重开。
+    httpx 客户端本就支持不经上下文直接使用（连接按需建立、自动复用）。
+    """
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type=None, exc=None, tb=None):
+        return None
+
+
+HTTP = SharedClient(follow_redirects=True, timeout=httpx.Timeout(15, read=120))
+HTTP_NO_REDIRECT = SharedClient(follow_redirects=False, timeout=httpx.Timeout(15, read=120))
 
 
 def _create_all(cred_store) -> dict:
@@ -21,4 +43,5 @@ def _create_all(cred_store) -> dict:
     return {pid: cls(cred_store) for pid, cls in REGISTRY.items()}
 
 
-__all__ = ["PanError", "PanProvider", "DirectLink", "FileEntry", "REGISTRY", "_create_all", "httpx"]
+__all__ = ["PanError", "PanProvider", "DirectLink", "FileEntry", "REGISTRY",
+           "_create_all", "HTTP", "HTTP_NO_REDIRECT", "httpx"]

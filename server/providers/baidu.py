@@ -8,6 +8,7 @@
 import httpx
 
 from .base import DirectLink, FileEntry, PanError, PanProvider, register
+from . import HTTP, HTTP_NO_REDIRECT
 
 BASE = "https://pan.baidu.com/rest/2.0/xpan"
 
@@ -31,7 +32,7 @@ class BaiduProvider(PanProvider):
         return {"access_token": c["access_token"], **extra}
 
     async def login(self, cred: dict) -> dict:
-        async with httpx.AsyncClient(timeout=20) as cli:
+        async with HTTP as cli:
             r = await cli.get(f"{BASE}/quota",
                               params={"access_token": cred["access_token"], "method": "info"})
         data = r.json()
@@ -42,7 +43,7 @@ class BaiduProvider(PanProvider):
     async def list_dir(self, path: str) -> list[FileEntry]:
         dir_path = path or "/"
         params = self._params(method="list", dir=dir_path, limit=1000, web="1")
-        async with httpx.AsyncClient(timeout=30) as cli:
+        async with HTTP as cli:
             r = await cli.get(f"{BASE}/file", params=params)
         data = r.json()
         if data.get("errno") != 0:
@@ -54,7 +55,7 @@ class BaiduProvider(PanProvider):
 
     async def resolve(self, entry) -> DirectLink:
         params = self._params(method="filemetas", fsids=f"[{entry.fsid}]", dlink="1")
-        async with httpx.AsyncClient(timeout=30) as cli:
+        async with HTTP as cli:
             r = await cli.get(f"{BASE}/file", params=params)
         data = r.json()
         if data.get("errno") != 0 or not data.get("list"):

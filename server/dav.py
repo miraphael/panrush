@@ -17,6 +17,9 @@ from .providers.base import FileEntry
 
 XML_HEAD = '<?xml version="1.0" encoding="utf-8"?>'
 CHUNK = 256 * 1024
+# DAV 流式转发专用长连接池（read 超时比共享池长，容忍播放器拖动时的上游停顿）
+from .providers import SharedClient
+DAV_HTTP = SharedClient(follow_redirects=True, timeout=httpx.Timeout(20, read=600))
 
 
 def _x(s: str) -> str:
@@ -28,8 +31,19 @@ class DavApp:
 
     def __init__(self, providers):
         self.providers = providers
-        self._cache: dict = {}   # (pid, fsid) -> (ts, entries)
+        self._cache: dict = {}   # (pid, fsid) -> (ts, entries) 目录缓存
+        self._links: dict = {}   # (pid, fsid, size) -> (expire_ts, DirectLink) 直链缓存
         self._ttl = 60
+
+    async def _link(self, provider, fe: FileEntry):
+        """直链缓存：expires_in 内复用，避免每个 DAV 请求都打一次取链 API。"""
+        key = (provider.id, fe.fsid, fe.size)
+        ts, val = self._links.get(key, (0.0, None))
+        if val is not None and time.time() < ts:
+            return val
+        val = await provider.resolve(fe)
+        self._links[key] = (time.time() + max(val.expires_in - 30, 30), val)
+        return val
 
     # ---------- ASGI 入口 ----------
 
@@ -137,27 +151,26 @@ class DavApp:
             await self._send(send, 404, [], b"not found")
             return
         fe = FileEntry(fsid=entry.fsid, name=entry.name, size=entry.size, is_dir=False)
-        link = await provider.resolve(fe)
         for attempt in (0, 1):
+            link = await self._link(provider, fe)
             upstream_headers = dict(link.headers)
             rng = req_headers.get("range")
             if rng and link.supports_range:
                 upstream_headers["Range"] = rng
-            async with httpx.AsyncClient(
-                    follow_redirects=True, timeout=httpx.Timeout(20, read=600)) as cli:
-                async with cli.stream("GET", link.url, headers=upstream_headers) as r:
-                    if r.status_code in (401, 403, 410) and attempt == 0:
-                        link = await provider.resolve(fe)  # 直链过期，重取一次
-                        continue
-                    out = [("Accept-Ranges", "bytes")]
-                    for h in ("content-length", "content-range", "content-type",
-                              "content-disposition"):
-                        if h in r.headers:
-                            out.append((h, r.headers[h]))
-                    body_iter = (None if head_only else
-                                 (chunk async for chunk in r.aiter_bytes(CHUNK)))
-                    await self._send(send, r.status_code, out, None, body_iter)
-                    return
+            async with DAV_HTTP.stream("GET", link.url, headers=upstream_headers) as r:
+                if r.status_code in (401, 403, 410) and attempt == 0:
+                    # 直链过期：清缓存强制重取，再试一次
+                    self._links.pop((provider.id, fe.fsid, fe.size), None)
+                    continue
+                out = [("Accept-Ranges", "bytes")]
+                for h in ("content-length", "content-range", "content-type",
+                          "content-disposition"):
+                    if h in r.headers:
+                        out.append((h, r.headers[h]))
+                body_iter = (None if head_only else
+                             (chunk async for chunk in r.aiter_bytes(CHUNK)))
+                await self._send(send, r.status_code, out, None, body_iter)
+                return
         await self._send(send, 502, [], b"direct link keeps failing")
 
     # ---------- ASGI 响应工具 ----------

@@ -7,6 +7,7 @@
 import httpx
 
 from .base import DirectLink, FileEntry, PanError, PanProvider, register
+from . import HTTP, HTTP_NO_REDIRECT
 
 BASE = "https://drive-pc.quark.cn/1/clouddrive"
 COMMON = {"pr": "ucpro", "fr": "pc"}
@@ -31,7 +32,7 @@ class QuarkProvider(PanProvider):
         return {"Cookie": c["cookie"], "Referer": "https://pan.quark.cn/"}
 
     async def login(self, cred: dict) -> dict:
-        async with httpx.AsyncClient(timeout=20) as cli:
+        async with HTTP as cli:
             r = await cli.get(f"{BASE}/member", params=COMMON,
                               headers={"Cookie": cred["cookie"], "Referer": "https://pan.quark.cn/"})
         data = r.json()
@@ -43,7 +44,7 @@ class QuarkProvider(PanProvider):
         fid = path or "0"
         headers = self._headers()
         entries = []
-        async with httpx.AsyncClient(timeout=30) as cli:
+        async with HTTP as cli:
             for page in range(1, 100):
                 params = {**COMMON, "p": "0", "fid": fid, "_page": page, "_size": 200,
                           "_fetch_total": "1", "_sort": "file_type:asc,file_name:asc"}
@@ -63,7 +64,7 @@ class QuarkProvider(PanProvider):
 
     async def resolve(self, entry) -> DirectLink:
         headers = self._headers()
-        async with httpx.AsyncClient(timeout=30) as cli:
+        async with HTTP as cli:
             r = await cli.post(f"{BASE}/file/download", params=COMMON,
                                json={"fids": [entry.fsid]}, headers=headers)
         data = r.json()

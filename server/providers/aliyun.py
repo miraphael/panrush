@@ -9,6 +9,7 @@ import time
 import httpx
 
 from .base import DirectLink, FileEntry, PanError, PanProvider, register
+from . import HTTP, HTTP_NO_REDIRECT
 
 BASE = "https://openapi.alipan.com"
 
@@ -37,7 +38,7 @@ class AliyunProvider(PanProvider):
             c = self.cred
             if not c:
                 raise PanError("未配置凭据")
-            async with httpx.AsyncClient(timeout=20) as cli:
+            async with HTTP as cli:
                 r = await cli.post(f"{BASE}/oauth/access_token", json={
                     "client_id": c["client_id"], "client_secret": c["client_secret"],
                     "grant_type": "refresh_token", "refresh_token": c["refresh_token"],
@@ -52,7 +53,7 @@ class AliyunProvider(PanProvider):
     async def _get_drive_id(self, headers: dict) -> str:
         if self._drive_id:
             return self._drive_id
-        async with httpx.AsyncClient(timeout=20) as cli:
+        async with HTTP as cli:
             r = await cli.post(f"{BASE}/adrive/v1.0/user/getInfo", headers=headers, json={})
         data = r.json()
         self._drive_id = data.get("default_drive_id") or ""
@@ -71,7 +72,7 @@ class AliyunProvider(PanProvider):
         drive_id = await self._get_drive_id(headers)
         parent = path or "root"
         entries, marker = [], ""
-        async with httpx.AsyncClient(timeout=30) as cli:
+        async with HTTP as cli:
             for _ in range(100):
                 body = {"drive_id": drive_id, "parent_file_id": parent, "limit": 100,
                         "order_by": "name", "order_direction": "ASC"}
@@ -94,7 +95,7 @@ class AliyunProvider(PanProvider):
     async def resolve(self, entry) -> DirectLink:
         headers = await self._auth_headers()
         drive_id = await self._get_drive_id(headers)
-        async with httpx.AsyncClient(timeout=30) as cli:
+        async with HTTP as cli:
             r = await cli.post(f"{BASE}/adrive/v1.0/openFile/getDownloadUrl",
                                headers=headers, json={"drive_id": drive_id, "file_id": entry.fsid})
         data = r.json()

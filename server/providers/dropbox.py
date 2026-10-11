@@ -10,6 +10,7 @@ import time
 import httpx
 
 from .base import DirectLink, FileEntry, PanError, PanProvider, register
+from . import HTTP, HTTP_NO_REDIRECT
 
 API = "https://api.dropboxapi.com/2/files"
 CONTENT = "https://content.dropboxapi.com/2/files"
@@ -40,7 +41,7 @@ class DropboxProvider(PanProvider):
         c = self.cred
         if not c:
             raise PanError("未配置凭据")
-        async with httpx.AsyncClient(timeout=20) as cli:
+        async with HTTP as cli:
             r = await cli.post("https://api.dropboxapi.com/oauth2/token", data={
                 "grant_type": "refresh_token",
                 "refresh_token": c["refresh_token"],
@@ -64,7 +65,7 @@ class DropboxProvider(PanProvider):
         token = await self._access_token()
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         entries = []
-        async with httpx.AsyncClient(timeout=30) as cli:
+        async with HTTP as cli:
             body = {"path": path or "", "limit": 500}
             while body is not None:
                 endpoint = f"{API}/list_folder" if "path" in body else f"{API}/list_folder/continue"

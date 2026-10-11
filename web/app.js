@@ -161,9 +161,17 @@ async function openProvider(p) {
 
 let selected = new Set();   // 批量下载：当前目录勾选的文件 fsid
 
-async function browse(path) {
+async function browse(path, refresh = 0) {
   if (!current) return;
-  const data = await api(`/api/fs?provider=${current.id}&path=${encodeURIComponent(path)}`);
+  const tbody = $("#file-list");
+  tbody.innerHTML = `<tr><td colspan="4" class="empty">加载中…</td></tr>`;
+  let data;
+  try {
+    data = await api(`/api/fs?provider=${current.id}&path=${encodeURIComponent(path)}&refresh=${refresh}`);
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4" class="empty">加载失败：${escapeHtml(err.message)}<br>点 ↻ 刷新重试</td></tr>`;
+    return;
+  }
   currentPath = data.path;
   selected = new Set();
   updateBatchBtn();
@@ -418,6 +426,7 @@ $("#sel-all").addEventListener("change", (e) => {
   });
   updateBatchBtn();
 });
+$("#btn-refresh").addEventListener("click", () => { if (current && currentPath !== null) browse(currentPath, 1); });
 $("#batch-dl").addEventListener("click", batchDownload);
 $("#gsearch").addEventListener("keydown", (e) => { if (e.key === "Enter") globalSearch(); });
 
