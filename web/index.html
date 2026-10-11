@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PanRush · 网盘聚合下载器</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>Pan<span>Rush</span></h1>
+  <div class="quick">
+    <input id="quick-url" placeholder="粘贴任意 HTTP(S) 直链，回车直接下载…">
+    <button id="quick-btn">直链下载</button>
+  </div>
+  <div class="total-speed" id="total-speed">0 B/s</div>
+</header>
+
+<main>
+  <aside id="sidebar">
+    <h2>网盘</h2>
+    <div id="provider-list"></div>
+    <div class="settings">
+      <h2>设置</h2>
+      <label>下载目录<br><input id="cfg-dest" type="text"></label>
+      <label>单任务连接数<br><input id="cfg-conns" type="number" min="1" max="64"></label>
+      <button id="cfg-save">保存设置</button>
+    </div>
+  </aside>
+
+  <section id="browser">
+    <div id="cred-panel" class="hidden"></div>
+    <div id="file-panel" class="hidden">
+      <div id="breadcrumb" class="crumb"></div>
+      <table>
+        <thead><tr><th>名称</th><th class="size-col">大小</th><th class="act-col"></th></tr></thead>
+        <tbody id="file-list"></tbody>
+      </table>
+    </div>
+    <div id="welcome">左侧选择一个网盘开始浏览；或在顶部粘贴直链下载。<br><br>
+      每个网盘首次使用需先点击其卡片上的「配置凭据」。</div>
+  </section>
+
+  <section id="tasks-pane">
+    <h2>下载任务</h2>
+    <div id="task-list"></div>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
