@@ -19,6 +19,9 @@
 
 <main>
   <aside id="sidebar">
+    <div class="gsearch">
+      <input id="gsearch" placeholder="🔍 跨盘搜索文件名，回车…">
+    </div>
     <h2>网盘</h2>
     <div id="provider-list"></div>
     <div class="settings">
@@ -41,9 +44,13 @@
   <section id="browser">
     <div id="cred-panel" class="hidden"></div>
     <div id="file-panel" class="hidden">
-      <div id="breadcrumb" class="crumb"></div>
+      <div class="crumb-row">
+        <div id="breadcrumb" class="crumb"></div>
+        <button id="batch-dl" class="primary hidden">下载所选</button>
+      </div>
       <table>
-        <thead><tr><th>名称</th><th class="size-col">大小</th><th class="act-col"></th></tr></thead>
+        <thead><tr><th class="sel-col"><input type="checkbox" id="sel-all"></th>
+          <th>名称</th><th class="size-col">大小</th><th class="act-col"></th></tr></thead>
         <tbody id="file-list"></tbody>
       </table>
     </div>
@@ -61,6 +68,7 @@
       <button class="ftab" data-f="active">进行中</button>
       <button class="ftab" data-f="done">已完成</button>
       <button class="ftab" data-f="error">失败</button>
+      <button id="clear-done" class="mini" title="移除已完成任务（不删除文件）">清已完成</button>
     </div>
     <div id="task-list"></div>
   </section>

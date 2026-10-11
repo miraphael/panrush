@@ -23,8 +23,8 @@ class WebDAVProvider(PanProvider):
     root = "/"
     cred_fields = [
         {"key": "base_url", "label": "服务器地址", "placeholder": "https://dav.example.com/dav", "secret": False},
-        {"key": "username", "label": "用户名", "placeholder": "", "secret": False},
-        {"key": "password", "label": "密码", "placeholder": "", "secret": True},
+        {"key": "username", "label": "用户名（匿名可留空）", "placeholder": "", "secret": False, "optional": True},
+        {"key": "password", "label": "密码（匿名可留空）", "placeholder": "", "secret": True, "optional": True},
     ]
     help = "任意 WebDAV 服务（坚果云、InfiniCloud、自建等），满速。"
 

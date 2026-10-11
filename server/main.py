@@ -3,6 +3,7 @@
 启动: python -m uvicorn server.main:app --host 127.0.0.1 --port 18400
 """
 
+import asyncio
 import logging
 import os
 import sys
@@ -77,7 +78,8 @@ async def save_cred(pid: str, body: CredBody):
     p = providers.get(pid)
     if not p:
         raise HTTPException(404, "provider 不存在")
-    missing = [f["key"] for f in p.cred_fields if not body.values.get(f["key"])]
+    missing = [f["key"] for f in p.cred_fields
+               if not body.values.get(f["key"]) and not f.get("optional")]
     if missing:
         raise HTTPException(400, f"缺少字段: {', '.join(missing)}")
     try:
@@ -294,6 +296,80 @@ async def resume_all():
         if t.status in ("paused", "error"):
             engine.resume(tid)
     return {"ok": True}
+
+
+@app.post("/api/tasks-all/clear-done")
+async def clear_done():
+    """清理已完成任务（保留已下载的文件）。"""
+    n = 0
+    for tid, t in list(engine.tasks.items()):
+        if t.status == "done":
+            engine.delete(tid)
+            n += 1
+    return {"ok": True, "cleared": n}
+
+
+# ---------- 跨盘搜索 ----------
+
+SEARCH_MAX_FILES = 400      # 每盘最多扫描条目数（防风控）
+SEARCH_MAX_HITS = 50        # 每盘最多命中数
+SEARCH_MAX_DEPTH = 3        # 目录深度
+
+
+async def _scan_provider(p, q: str) -> list:
+    out, seen = [], 0
+    queue = [(p.root, "", 0)]  # (fsid, 父路径显示, 深度)
+    while queue and seen < SEARCH_MAX_FILES and len(out) < SEARCH_MAX_HITS:
+        path, parent, depth = queue.pop(0)
+        try:
+            entries = await p.list_dir(path)
+        except Exception:
+            break
+        for e in entries:
+            seen += 1
+            full = f"{parent}/{e.name}" if parent else f"/{e.name}"
+            if e.is_dir:
+                if depth < SEARCH_MAX_DEPTH:
+                    queue.append((e.fsid, full, depth + 1))
+            elif q in e.name.lower():
+                out.append({"provider": p.id, "provider_name": p.name,
+                            "fsid": e.fsid, "name": e.name, "size": e.size,
+                            "path": parent or "/"})
+    return out
+
+
+@app.get("/api/search")
+async def search(q: str):
+    """跨盘搜索：在所有已配置网盘里按文件名子串查找（限速扫描，防风控）。"""
+    q = q.strip().lower()
+    if not q:
+        return {"results": []}
+    scans = [_scan_provider(p, q) for p in providers.values()
+             if p.id != "direct" and p.cred_saved()]
+    groups = await asyncio.gather(*scans, return_exceptions=True)
+    results = [r for g in groups if isinstance(g, list) for r in g]
+    results.sort(key=lambda r: (r["provider"], r["path"]))
+    return {"results": results}
+
+
+# ---------- 检查更新 ----------
+
+@app.get("/api/update")
+async def check_update():
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as cli:
+            r = await cli.get("https://api.github.com/repos/miraphael/panrush/releases/latest",
+                              headers={"Accept": "application/vnd.github+json"})
+        if r.status_code == 404:
+            return {"current": __version__, "latest": None, "update_available": False,
+                    "url": "https://github.com/miraphael/panrush/releases"}
+        tag = r.json().get("tag_name", "").lstrip("v")
+        return {"current": __version__, "latest": tag,
+                "update_available": tag > __version__,
+                "url": r.json().get("html_url") or "https://github.com/miraphael/panrush/releases"}
+    except Exception as e:
+        raise HTTPException(502, f"检查更新失败: {e}")
 
 
 # 静态 Web UI（必须放最后：兜底路由，先于它的 API 路由优先匹配）

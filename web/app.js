@@ -62,6 +62,12 @@ const fmtSize = (n) => {
   return n.toFixed(i ? 1 : 0) + " " + u[i];
 };
 const fmtSpeed = (n) => (n ? fmtSize(n) + "/s" : "—");
+const fmtDur = (s) => {
+  if (!isFinite(s) || s <= 0) return "—";
+  if (s < 60) return Math.ceil(s) + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m" + Math.ceil(s % 60) + "s";
+  return Math.floor(s / 3600) + "h" + Math.floor((s % 3600) / 60) + "m";
+};
 
 /* ---------- 提供方侧栏 ---------- */
 
@@ -123,22 +129,28 @@ async function openProvider(p) {
   $("#cred-panel").classList.add("hidden");
   $("#welcome").classList.add("hidden");
   $("#file-panel").classList.remove("hidden");
+  $("#gsearch").value = "";
   await browse(p.root);
 }
+
+let selected = new Set();   // 批量下载：当前目录勾选的文件 fsid
 
 async function browse(path) {
   if (!current) return;
   const data = await api(`/api/fs?provider=${current.id}&path=${encodeURIComponent(path)}`);
   currentPath = data.path;
+  selected = new Set();
+  updateBatchBtn();
   renderBreadcrumb();
   const tbody = $("#file-list");
   tbody.innerHTML = "";
   if (!data.entries.length) {
-    tbody.innerHTML = `<tr><td colspan="3" class="empty">空目录</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="empty">空目录</td></tr>`;
   }
   for (const e of data.entries) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
+      <td class="sel-col">${e.is_dir ? "" : `<input type="checkbox" class="row-sel" data-fsid="${escapeHtml(e.fsid)}">`}</td>
       <td class="name ${e.is_dir ? "dir" : ""}">${e.is_dir ? "📁 " : "📄 "}${escapeHtml(e.name)}</td>
       <td class="size-col">${e.is_dir ? "" : fmtSize(e.size)}</td>
       <td class="act-col">${e.is_dir ? "" : `<button class="primary dl-btn">下载</button>`}</td>`;
@@ -148,18 +160,77 @@ async function browse(path) {
         browse(e.fsid);
       }
     });
-    tr.querySelector(".dl-btn")?.addEventListener("click", async () => {
-      try {
-        await api("/api/tasks", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            provider: current.id, fsid: e.fsid, name: e.name, size: e.size,
-            dest_dir: $("#cfg-dest").value.trim(),
-          }),
-        });
-        pollTasks();
-      } catch (err) { alert("创建任务失败：" + err.message); }
+    tr.querySelector(".row-sel")?.addEventListener("change", (ev) => {
+      ev.target.checked ? selected.add(e.fsid) : selected.delete(e.fsid);
+      updateBatchBtn();
     });
+    tr.querySelector(".dl-btn")?.addEventListener("click", () => createTask(current, e));
+    tbody.appendChild(tr);
+  }
+}
+
+async function createTask(provider, e) {
+  try {
+    await api("/api/tasks", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: provider.id, fsid: e.fsid, name: e.name, size: e.size,
+        dest_dir: $("#cfg-dest").value.trim(),
+      }),
+    });
+    pollTasks();
+  } catch (err) { alert("创建任务失败：" + err.message); }
+}
+
+function updateBatchBtn() {
+  const btn = $("#batch-dl");
+  btn.classList.toggle("hidden", selected.size === 0);
+  btn.textContent = selected.size ? `下载所选 (${selected.size})` : "下载所选";
+}
+
+async function batchDownload() {
+  // 从当前目录行收集勾选文件的信息
+  const rows = [...document.querySelectorAll("#file-list .row-sel")].filter(c => c.checked);
+  for (const box of rows) {
+    const e = box.dataset;
+    const tr = box.closest("tr");
+    const name = tr.querySelector("td.name").textContent.trim().replace(/^[📁📄]\s*/, "");
+    const sizeText = tr.querySelector(".size-col").textContent.trim();
+    await createTask(current, { fsid: e.fsid, name, size: -1 });
+  }
+}
+
+/* ---------- 跨盘搜索 ---------- */
+
+async function globalSearch() {
+  const q = $("#gsearch").value.trim();
+  if (!q) return;
+  $("#welcome").classList.add("hidden");
+  $("#cred-panel").classList.add("hidden");
+  $("#file-panel").classList.remove("hidden");
+  document.querySelectorAll(".pcard").forEach(c => c.classList.remove("active"));
+  const tbody = $("#file-list");
+  $("#batch-dl").classList.add("hidden");
+  $("#breadcrumb").innerHTML = `🔍 搜索 “${escapeHtml(q)}” — <a id="search-back">返回浏览</a>`;
+  tbody.innerHTML = `<tr><td colspan="4" class="empty">正在搜索所有已配置的网盘…</td></tr>`;
+  $("#search-back").addEventListener("click", () => { if (current) openProvider(current); });
+  let res;
+  try { res = await api(`/api/search?q=${encodeURIComponent(q)}`); }
+  catch (err) { tbody.innerHTML = `<tr><td colspan="4" class="empty">搜索失败：${escapeHtml(err.message)}</td></tr>`; return; }
+  tbody.innerHTML = "";
+  if (!res.results.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="empty">所有网盘都没有找到匹配文件（仅扫描已配置凭据的盘）</td></tr>`;
+    return;
+  }
+  for (const r of res.results) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="sel-col"></td>
+      <td class="name">📄 ${escapeHtml(r.name)}<span class="dim"> · ${escapeHtml(r.provider_name)} · ${escapeHtml(r.path)}</span></td>
+      <td class="size-col">${fmtSize(r.size)}</td>
+      <td class="act-col"><button class="primary dl-btn">下载</button></td>`;
+    tr.querySelector(".dl-btn").addEventListener("click", () =>
+      createTask({ id: r.provider }, { fsid: r.fsid, name: r.name, size: r.size }));
     tbody.appendChild(tr);
   }
 }
@@ -226,7 +297,7 @@ async function pollTasks() {
       <div class="trow"><span class="tname" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
         <span class="tmeta">${STATUS[t.status] || t.status}</span></div>
       <div class="bar"><div style="width:${Math.min(100, t.percent)}%"></div></div>
-      <div class="trow"><span class="tmeta">${fmtSize(t.done)} / ${t.size > 0 ? fmtSize(t.size) : "?"} · ${fmtSpeed(t.speed)}</span>
+      <div class="trow"><span class="tmeta">${fmtSize(t.done)} / ${t.size > 0 ? fmtSize(t.size) : "?"} · ${fmtSpeed(t.speed)}${t.status === "downloading" && t.speed > 0 && t.size > 0 ? ` · 剩余 ${fmtDur((t.size - t.done) / t.speed)}` : ""}</span>
         <span class="tacts">
           ${["paused", "error"].includes(t.status) ? `<button data-act="resume">继续</button>` : ""}
           ${["downloading", "resolving", "pending"].includes(t.status) ? `<button data-act="pause">暂停</button>` : ""}
@@ -311,6 +382,31 @@ $("#cfg-open").addEventListener("click", async () => {
 });
 $("#pause-all").addEventListener("click", () => api("/api/tasks-all/pause", { method: "POST" }).then(pollTasks));
 $("#resume-all").addEventListener("click", () => api("/api/tasks-all/resume", { method: "POST" }).then(pollTasks));
+$("#clear-done").addEventListener("click", () => api("/api/tasks-all/clear-done", { method: "POST" }).then(pollTasks));
+
+$("#sel-all").addEventListener("change", (e) => {
+  document.querySelectorAll("#file-list .row-sel").forEach(c => {
+    c.checked = e.target.checked;
+    const fsid = c.dataset.fsid;
+    e.target.checked ? selected.add(fsid) : selected.delete(fsid);
+  });
+  updateBatchBtn();
+});
+$("#batch-dl").addEventListener("click", batchDownload);
+$("#gsearch").addEventListener("keydown", (e) => { if (e.key === "Enter") globalSearch(); });
+
+$("#ver").style.cursor = "pointer";
+$("#ver").title = "点击检查更新";
+$("#ver").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/update");
+    if (r.update_available) {
+      if (confirm(`发现新版本 v${r.latest}（当前 v${r.current}），打开下载页？`)) window.open(r.url);
+    } else {
+      alert(`已是最新版本 v${r.current}` + (r.latest ? `（最新 v${r.latest}）` : "（仓库还没有发布版本）"));
+    }
+  } catch (err) { alert("检查更新失败：" + err.message); }
+});
 
 document.querySelectorAll(".ftab").forEach(b => b.addEventListener("click", () => {
   document.querySelectorAll(".ftab").forEach(x => x.classList.remove("active"));

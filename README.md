@@ -13,7 +13,10 @@
 - ⏸️ **断点续传**：分段进度每秒落 SQLite，暂停 / 重启 / 崩溃后接着下
 - 🚦 **并发与限速**：全局令牌桶限速（KB/s）+ 同时下载任务数上限（排队等待），防风控
 - 📝 **冲突保护**：目标文件已存在自动改名 `file (1).ext`，绝不覆盖
-- 🔔 **任务体验**：浏览器完成通知、任务过滤器、实时速度曲线
+- 🔔 **任务体验**：浏览器完成通知、任务过滤器、ETA 剩余时间、实时速度曲线
+- 🔍 **跨盘搜索**：一个搜索框扫所有已配置网盘，结果一键下载（限速扫描防风控）
+- 📥 **批量下载**：文件浏览复选框多选、一键下载所选；一键清理已完成任务
+- 🔄 **检查更新**：对接 GitHub Releases，点击版本号即查
 - 🖥️ **完整桌面软件规格**：系统托盘常驻、开机自启、下载完成后自动关机/睡眠、滚动日志（data/panrush.log）
 - 🔐 **凭据安全**：Cookie / token 经 Windows DPAPI 加密后才落盘
 - 🧱 **零构建 Web UI**：原生 JS 单页，聚合文件浏览 + 实时任务队列
@@ -100,18 +103,19 @@ class MyPanProvider(PanProvider):
 ## 🧪 测试
 
 ```bash
-python tests/range_server.py 8765 tests      # 起测试文件服务器（含 Range 支持）
+python tests/range_server.py 8765 tests      # 直链测试服务器（含 Range 支持）
+python tests/dav_server.py 8766 tests        # WebDAV 测试服务器（PROPFIND + Range）
 python -m uvicorn server.main:app --port 18400 &
-python tests/e2e_test.py                     # 分段下载 + 哈希校验 + 暂停/恢复
+python tests/e2e_test.py                     # 7 节：分段/续传/冲突/并发/WebDAV/跨盘搜索
 ```
 
 ## 🗺️ Roadmap
 
 - [ ] MEGA 驱动（AES+RSA 会话加密，需专项实现）
 - [ ] 迅雷 / UC 网盘 / 115 驱动（签名类接口，需专项）
-- [ ] 跨盘搜索中转（同一文件在其他满速盘找副本）
 - [ ] 对外 WebDAV 出口（把聚合盘挂给播放器 / rclone）
 - [ ] 凭据内置引导（OAuth 授权页一键跳转，免去手动开控制台）
+- [ ] 跨盘搜索哈希级匹配（同名同大小 → 内容比对）
 - [ ] Linux / macOS 打包
 
 ## ⚖️ 使用声明

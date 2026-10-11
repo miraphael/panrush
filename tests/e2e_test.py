@@ -119,6 +119,30 @@ def main():
     print("    ✓ 4 个任务全部完成且哈希校验通过（wait_done 内部仅查状态）")
     api("/api/config", {"max_concurrent_tasks": 3, "conns_per_task": 16})
 
+    print("[6] WebDAV 驱动全流程（本地 DAV 服务器 :8766）")
+    try:
+        api("/api/providers/webdav/cred",
+            {"values": {"base_url": "http://127.0.0.1:8766", "username": "", "password": ""}})
+    except Exception as e:
+        print(f"    (跳过：DAV 服务器未启动 — {e})")
+    else:
+        fs = api("/api/fs?provider=webdav&path=/")
+        names = [e["name"] for e in fs["entries"]]
+        assert "testdata.bin" in names, f"列目录缺少 testdata.bin: {names}"
+        tw = api("/api/tasks", {"provider": "webdav", "fsid": "/testdata.bin",
+                                "name": "testdata.bin", "size": size})
+        tw = wait_done(tw["id"])
+        assert tw["status"] == "done", f"WebDAV 下载失败: {tw['error']}"
+        assert sha256(tw["dest"]) == src_hash, "WebDAV 下载哈希不一致"
+        print("    ✓ PROPFIND 列目录 + 下载 + 哈希一致")
+        api(f"/api/tasks/{tw['id']}/delete", method="POST")
+
+    print("[7] 跨盘搜索")
+    res = api("/api/search?q=testdata")
+    provs = {r["provider"] for r in res["results"]}
+    assert "webdav" in provs, f"搜索未命中 WebDAV: {provs}"
+    print(f"    ✓ 命中 {len(res['results'])} 个结果（provider: {sorted(provs)}）")
+
     api(f"/api/tasks/{t['id']}/delete", method="POST")
     api(f"/api/tasks/{t2['id']}/delete", method="POST")
     print("\n全部通过 ✓")
