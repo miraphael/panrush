@@ -3,7 +3,7 @@
 设计要点：
 - 网盘直链往往带 Cookie/Referer 且有效期短（夸克几十秒），所以引擎在下载前一刻
   通过 provider.resolve() 取链；连接被拒(401/403/410)时自动重取，分段进度不丢。
-- 大文件按 conns_per_task 分段并发，用 os.pwrite 按偏移写同一文件。
+- 大文件按 conns_per_task 分段并发，按偏移写同一文件（每段独立句柄）。
 - 分段进度每秒落盘，重启/暂停后续传。
 """
 
@@ -29,6 +29,35 @@ class Paused(Exception):
     pass
 
 
+class RateLimiter:
+    """全局令牌桶限速（KB/s，0 = 不限）。所有任务共享。"""
+
+    def __init__(self, kbps: int = 0):
+        self.kbps = kbps
+        self._tokens = float(kbps)
+        self._last = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    def set_rate(self, kbps: int):
+        self.kbps = kbps
+
+    async def consume(self, n: int):
+        if self.kbps <= 0:
+            return
+        async with self._lock:
+            while True:
+                now = time.monotonic()
+                self._tokens = min(
+                    self._tokens + (now - self._last) / 1000 * self.kbps, float(self.kbps)
+                )
+                self._last = now
+                if self._tokens >= n:
+                    self._tokens -= n
+                    return
+                deficit = (n - self._tokens) / self.kbps
+                await asyncio.sleep(min(deficit, 0.25))
+
+
 def _sanitize(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', "_", name).strip() or "download.bin"
 
@@ -49,6 +78,7 @@ class Engine:
         self.config = config
         self.tasks: dict[str, Task] = {}
         self.http = httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(20, read=120))
+        self.limiter = RateLimiter(getattr(config, "global_speed_limit_kbps", 0))
         self._link_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._running: dict[str, asyncio.Task] = {}
         self._reporter: asyncio.Task | None = None
@@ -264,6 +294,7 @@ class Engine:
                     async for chunk in r.aiter_bytes(256 * 1024):
                         if t.pause_event.is_set():
                             raise Paused()
+                        await self.limiter.consume(len(chunk))
                         os.lseek(fd, seg["start"] + seg["pos"], os.SEEK_SET)
                         os.write(fd, chunk)
                         seg["pos"] += len(chunk)
@@ -297,6 +328,7 @@ class Engine:
                 async for chunk in r.aiter_bytes(256 * 1024):
                     if t.pause_event.is_set():
                         raise Paused()
+                    await self.limiter.consume(len(chunk))
                     f.write(chunk)
                     t.done += len(chunk)
 

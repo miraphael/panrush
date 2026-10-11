@@ -25,3 +25,6 @@ dist/
 # IDE
 .vscode/
 .idea/
+
+# 打包产物入口
+PanRush.spec.bak

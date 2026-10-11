@@ -4,26 +4,34 @@
 """
 
 import os
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import __version__
 from .config import Config
 from .cred_store import CredStore
 from .engine.downloader import Engine
 from .engine.task_store import TaskStore
 from .providers import PanError, _create_all
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # panhub/
-DATA_DIR = os.path.join(ROOT, "data")
+# 冻结模式(PyInstaller)：数据/配置放 exe 旁边，web 资源在包内 _MEIPASS
+if getattr(sys, "frozen", False):
+    APP_DIR = os.path.dirname(os.path.abspath(sys.executable))
+    WEB_DIR = os.path.join(getattr(sys, "_MEIPASS", APP_DIR), "web")
+else:
+    APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    WEB_DIR = os.path.join(APP_DIR, "web")
+DATA_DIR = os.path.join(APP_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
-config = Config(os.path.join(ROOT, "server", "config.json"))
-cred_store = CredStore(os.path.join(DATA_DIR, "panhub.db"))
+config = Config(os.path.join(APP_DIR, "config.json"))
+cred_store = CredStore(os.path.join(DATA_DIR, "panrush.db"))
 providers = _create_all(cred_store)
-task_store = TaskStore(os.path.join(DATA_DIR, "panhub.db"))
+task_store = TaskStore(os.path.join(DATA_DIR, "panrush.db"))
 engine = Engine(task_store, providers, config)
 
 
@@ -156,6 +164,8 @@ async def save_config(request: Request):
         if k in body:
             config.data[k] = body[k]
     config.save()
+    if "global_speed_limit_kbps" in body:
+        engine.limiter.set_rate(int(body["global_speed_limit_kbps"]))
     return config.data
 
 
@@ -165,4 +175,51 @@ async def get_config():
 
 
 # 静态 Web UI（放最后，兜底路由）
-app.mount("/", StaticFiles(directory=os.path.join(ROOT, "web"), html=True), name="web")
+app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+
+
+# ---------- 扩展操作 ----------
+
+@app.get("/api/version")
+async def version():
+    return {"name": "PanRush", "version": __version__}
+
+
+class OpenDirBody(BaseModel):
+    path: str = ""
+
+
+@app.post("/api/open-dir")
+async def open_dir(body: OpenDirBody):
+    """在资源管理器中打开下载目录（Windows；其他平台用 xdg-open/open）。"""
+    target = body.path or config.dest_dir
+    if not os.path.isdir(target):
+        raise HTTPException(400, f"目录不存在: {target}")
+    try:
+        if sys.platform == "win32":
+            os.startfile(target)  # noqa: S606
+        elif sys.platform == "darwin":
+            import subprocess
+            subprocess.Popen(["open", target])
+        else:
+            import subprocess
+            subprocess.Popen(["xdg-open", target])
+    except OSError as e:
+        raise HTTPException(500, f"打开失败: {e}")
+    return {"ok": True}
+
+
+@app.post("/api/tasks-all/pause")
+async def pause_all():
+    for t in engine.tasks.values():
+        if t.status in ("downloading", "resolving", "pending"):
+            engine.pause(t.id)
+    return {"ok": True}
+
+
+@app.post("/api/tasks-all/resume")
+async def resume_all():
+    for tid, t in list(engine.tasks.items()):
+        if t.status in ("paused", "error"):
+            engine.resume(tid)
+    return {"ok": True}

@@ -205,6 +205,7 @@ async function saveConfig() {
     body: JSON.stringify({
       dest_dir: $("#cfg-dest").value.trim(),
       conns_per_task: parseInt($("#cfg-conns").value) || 16,
+      global_speed_limit_kbps: parseInt($("#cfg-limit").value) || 0,
     }),
   });
   alert("设置已保存");
@@ -220,6 +221,15 @@ function escapeHtml(s) {
 $("#quick-btn").addEventListener("click", quickDownload);
 $("#quick-url").addEventListener("keydown", (e) => { if (e.key === "Enter") quickDownload(); });
 $("#cfg-save").addEventListener("click", saveConfig);
+$("#cfg-open").addEventListener("click", async () => {
+  const err = await api("/api/open-dir", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: $("#cfg-dest").value.trim() }),
+  }).then(() => null, (e) => e);
+  if (err) alert(err.message);
+});
+$("#pause-all").addEventListener("click", () => api("/api/tasks-all/pause", { method: "POST" }).then(pollTasks));
+$("#resume-all").addEventListener("click", () => api("/api/tasks-all/resume", { method: "POST" }).then(pollTasks));
 
 loadProviders().then(loadConfig);
 pollTasks();

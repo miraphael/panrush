@@ -9,6 +9,7 @@
 <body>
 <header>
   <h1>Pan<span>Rush</span></h1>
+  <span class="ver" id="ver"></span>
   <div class="quick">
     <input id="quick-url" placeholder="粘贴任意 HTTP(S) 直链，回车直接下载…">
     <button id="quick-btn">直链下载</button>
@@ -24,7 +25,9 @@
       <h2>设置</h2>
       <label>下载目录<br><input id="cfg-dest" type="text"></label>
       <label>单任务连接数<br><input id="cfg-conns" type="number" min="1" max="64"></label>
+      <label>全局限速 KB/s（0=不限）<br><input id="cfg-limit" type="number" min="0"></label>
       <button id="cfg-save">保存设置</button>
+      <button id="cfg-open">打开下载目录</button>
     </div>
   </aside>
 
@@ -42,7 +45,10 @@
   </section>
 
   <section id="tasks-pane">
-    <h2>下载任务</h2>
+    <h2>下载任务
+      <button id="pause-all" class="mini">全部暂停</button>
+      <button id="resume-all" class="mini">全部继续</button>
+    </h2>
     <div id="task-list"></div>
   </section>
 </main>
