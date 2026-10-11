@@ -3,9 +3,11 @@
 启动: python -m uvicorn server.main:app --host 127.0.0.1 --port 18400
 """
 
+import logging
 import os
 import sys
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
@@ -27,6 +29,17 @@ else:
     WEB_DIR = os.path.join(APP_DIR, "web")
 DATA_DIR = os.path.join(APP_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# 日志：滚动文件 + 控制台
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[
+        RotatingFileHandler(os.path.join(DATA_DIR, "panrush.log"),
+                            maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 config = Config(os.path.join(APP_DIR, "config.json"))
 cred_store = CredStore(os.path.join(DATA_DIR, "panrush.db"))
@@ -160,7 +173,8 @@ async def task_action(task_id: str, action: str):
 @app.post("/api/config")
 async def save_config(request: Request):
     body = await request.json()
-    for k in ("dest_dir", "conns_per_task", "max_concurrent_tasks", "global_speed_limit_kbps"):
+    for k in ("dest_dir", "conns_per_task", "max_concurrent_tasks",
+              "global_speed_limit_kbps", "auto_shutdown"):
         if k in body:
             config.data[k] = body[k]
     config.save()
@@ -168,6 +182,8 @@ async def save_config(request: Request):
         engine.limiter.set_rate(int(body["global_speed_limit_kbps"]))
     if "max_concurrent_tasks" in body:
         engine.slots.set_limit(int(body["max_concurrent_tasks"]))
+    if body.get("auto_shutdown") == "none":
+        engine._shutdown_at = None
     return config.data
 
 
@@ -185,6 +201,63 @@ async def version():
 
 class OpenDirBody(BaseModel):
     path: str = ""
+
+
+@app.get("/api/status")
+async def status():
+    """聚合状态：自动关机布防、任务统计。"""
+    tasks = engine.tasks.values()
+    return {
+        **engine.shutdown_status(),
+        "active": sum(1 for t in tasks if t.status in ("pending", "resolving", "downloading")),
+        "done": sum(1 for t in tasks if t.status == "done"),
+        "version": __version__,
+    }
+
+
+class AutostartBody(BaseModel):
+    enable: bool
+
+
+AUTOSTART_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+
+@app.post("/api/autostart")
+async def autostart(body: AutostartBody):
+    """开机自启（Windows 注册表 HKCU Run；仅冻结版 exe 支持写入自身路径）。"""
+    if sys.platform != "win32":
+        raise HTTPException(400, "仅支持 Windows")
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_KEY, 0, winreg.KEY_SET_VALUE) as k:
+            if body.enable:
+                if getattr(sys, "frozen", False):
+                    target = f'"{sys.executable}"'
+                else:
+                    py = sys.executable.replace("python.exe", "pythonw.exe")
+                    target = f'"{py}" "{os.path.join(APP_DIR, "run_exe.py")}"'
+                winreg.SetValueEx(k, "PanRush", 0, winreg.REG_SZ, target)
+            else:
+                try:
+                    winreg.DeleteValue(k, "PanRush")
+                except FileNotFoundError:
+                    pass
+    except OSError as e:
+        raise HTTPException(500, f"注册表写入失败: {e}")
+    return {"ok": True, "enabled": body.enable}
+
+
+@app.get("/api/autostart")
+async def autostart_state():
+    if sys.platform != "win32":
+        return {"enabled": False}
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_KEY) as k:
+            winreg.QueryValueEx(k, "PanRush")
+            return {"enabled": True}
+    except OSError:
+        return {"enabled": False}
 
 
 @app.post("/api/open-dir")

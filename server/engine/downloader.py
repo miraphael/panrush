@@ -9,8 +9,11 @@
 
 import asyncio
 import json
+import logging
 import os
 import re
+import subprocess
+import sys
 import time
 from collections import defaultdict
 from urllib.parse import unquote, urlparse
@@ -20,9 +23,12 @@ import httpx
 from ..providers.base import FileEntry
 from .task_store import Task, TaskStore
 
+log = logging.getLogger("panrush.engine")
+
 LINK_RETRIES = 6          # 直链失效后重取次数上限
 SEGMENT_RETRIES = 5       # 单段网络错误重试次数
 RETRY_BACKOFF = 1.5
+SHUTDOWN_COUNTDOWN = 60   # 自动关机倒计时（秒），期间新增任务可撤销
 
 
 class Paused(Exception):
@@ -118,6 +124,15 @@ class Engine:
         self._link_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._running: dict[str, asyncio.Task] = {}
         self._reporter: asyncio.Task | None = None
+        self._shutdown_at: float | None = None   # 自动关机布防时刻
+        self._shutdown_fired: bool = False
+
+    def shutdown_status(self) -> dict:
+        return {
+            "auto_shutdown": self.config.data.get("auto_shutdown", "none"),
+            "shutdown_at": self._shutdown_at,
+            "fired": self._shutdown_fired,
+        }
 
     # ---------- 生命周期 ----------
 
@@ -143,6 +158,10 @@ class Engine:
         t.name = os.path.basename(t.dest)
         self.store.save(t)
         self.tasks[t.id] = t
+        if self._shutdown_at:
+            log.info("新增任务，撤销自动关机倒计时")
+            self._shutdown_at = None
+        log.info("任务创建 %s ← %s/%s (%s)", t.name, provider_id, t.fsid, t.dest)
         self._spawn(t)
         return t
 
@@ -236,6 +255,7 @@ class Engine:
             t.status = "paused"
             t.speed = 0
             self.store.save(t)
+            log.info("任务暂停 %s (%d/%d)", t.name, t.done, t.size)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -243,6 +263,7 @@ class Engine:
             t.error = f"{type(e).__name__}: {e}"
             t.speed = 0
             self.store.save(t)
+            log.error("任务失败 %s: %s", t.name, t.error)
 
     async def _run_task(self, t: Task):
         t.status = "resolving"
@@ -284,6 +305,7 @@ class Engine:
         t.status = "done"
         t.speed = 0
         self.store.save(t)
+        log.info("任务完成 %s (%s)", t.name, t.dest)
 
     # ---------- 分段并发下载 ----------
 
@@ -381,11 +403,52 @@ class Engine:
     async def _report_loop(self):
         while True:
             await asyncio.sleep(1)
+            active = 0
             for t in self.tasks.values():
                 if t.status in ("downloading", "resolving"):
                     t.speed = max(0, t.done - t._last_done)
                     t._last_done = t.done
                     if t.status == "downloading":
                         self.store.save_progress(t)
+                    active += 1
                 else:
                     t.speed = 0
+            await self._check_auto_shutdown(active)
+
+    # ---------- 自动关机 ----------
+
+    async def _check_auto_shutdown(self, active: int):
+        mode = self.config.data.get("auto_shutdown", "none")
+        if mode in ("none", None, ""):
+            self._shutdown_at = None
+            return
+        if active > 0:
+            self._shutdown_at = None  # 有任务在跑，撤销倒计时
+            return
+        if self._shutdown_fired:
+            return
+        has_done = any(t.status == "done" for t in self.tasks.values())
+        if not has_done:
+            return
+        if self._shutdown_at is None:
+            self._shutdown_at = time.time() + SHUTDOWN_COUNTDOWN
+            log.info("全部任务完成，%d 秒后执行 %s（新增任务可撤销）", SHUTDOWN_COUNTDOWN, mode)
+            return
+        if time.time() >= self._shutdown_at:
+            self._shutdown_fired = True
+            self._shutdown_at = None
+            await asyncio.to_thread(self._execute_shutdown, mode)
+
+    def _execute_shutdown(self, mode: str):
+        try:
+            if sys.platform != "win32":
+                log.warning("自动关机仅支持 Windows")
+                return
+            if mode == "shutdown":
+                subprocess.run(["shutdown", "/s", "/t", "30"], check=False)
+                log.info("已执行关机命令（30 秒缓冲）")
+            elif mode == "sleep":
+                subprocess.run(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"], check=False)
+                log.info("已执行睡眠命令")
+        except OSError as e:
+            log.error("自动关机执行失败: %s", e)

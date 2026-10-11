@@ -9,6 +9,7 @@ DEFAULTS = {
     "min_segment_mb": 16,
     "max_concurrent_tasks": 3,
     "global_speed_limit_kbps": 0,  # 0 = 不限
+    "auto_shutdown": "none",       # none / shutdown / sleep
 }
 
 

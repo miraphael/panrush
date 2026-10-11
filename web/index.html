@@ -14,7 +14,7 @@
     <input id="quick-url" placeholder="粘贴任意 HTTP(S) 直链，回车直接下载…">
     <button id="quick-btn">直链下载</button>
   </div>
-  <div class="total-speed"><canvas id="speed-chart" width="120" height="26"></canvas> <span id="total-speed-text">0 B/s</span></div>
+  <div class="total-speed"><span id="shutdown-tip" class="shutdown hidden"></span><canvas id="speed-chart" width="120" height="26"></canvas> <span id="total-speed-text">0 B/s</span></div>
 </header>
 
 <main>
@@ -27,6 +27,12 @@
       <label>单任务连接数<br><input id="cfg-conns" type="number" min="1" max="64"></label>
       <label>同时下载任务数<br><input id="cfg-tasks" type="number" min="1" max="20"></label>
       <label>全局限速 KB/s（0=不限）<br><input id="cfg-limit" type="number" min="0"></label>
+      <label>下载完成后<br><select id="cfg-shutdown">
+        <option value="none">无操作</option>
+        <option value="shutdown">自动关机</option>
+        <option value="sleep">自动睡眠</option>
+      </select></label>
+      <label class="chk"><input id="cfg-autostart" type="checkbox"> 开机自启</label>
       <button id="cfg-save">保存设置</button>
       <button id="cfg-open">打开下载目录</button>
     </div>

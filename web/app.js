@@ -187,6 +187,18 @@ async function pollTasks() {
   if (speedHist.length > 60) speedHist.shift();
   drawSpeedChart();
 
+  // 自动关机倒计时提示
+  api("/api/status").then(s => {
+    const tip = $("#shutdown-tip");
+    if (s.shutdown_at && s.auto_shutdown !== "none") {
+      const left = Math.max(0, Math.ceil((s.shutdown_at * 1000 - Date.now()) / 1000));
+      tip.textContent = `⏻ ${s.auto_shutdown === "shutdown" ? "关机" : "睡眠"}倒计时 ${left}s`;
+      tip.classList.remove("hidden");
+    } else {
+      tip.classList.add("hidden");
+    }
+  }).catch(() => {});
+
   // 完成通知
   for (const t of tasks) {
     if (t.status === "done" && prevStatus[t.id] && prevStatus[t.id] !== "done") notifyDone(t);
@@ -253,6 +265,8 @@ async function loadConfig() {
   $("#cfg-conns").value = c.conns_per_task;
   $("#cfg-tasks").value = c.max_concurrent_tasks;
   $("#cfg-limit").value = c.global_speed_limit_kbps || 0;
+  $("#cfg-shutdown").value = c.auto_shutdown || "none";
+  api("/api/autostart").then(s => { $("#cfg-autostart").checked = s.enabled; }).catch(() => {});
   api("/api/version").then(v => {
     $("#ver").textContent = `v${v.version}`;
   }).catch(() => {});
@@ -264,9 +278,17 @@ async function saveConfig() {
     body: JSON.stringify({
       dest_dir: $("#cfg-dest").value.trim(),
       conns_per_task: parseInt($("#cfg-conns").value) || 16,
+      max_concurrent_tasks: parseInt($("#cfg-tasks").value) || 3,
       global_speed_limit_kbps: parseInt($("#cfg-limit").value) || 0,
+      auto_shutdown: $("#cfg-shutdown").value,
     }),
   });
+  try {
+    await api("/api/autostart", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enable: $("#cfg-autostart").checked }),
+    });
+  } catch (err) { alert("开机自启设置失败：" + err.message); }
   alert("设置已保存");
 }
 

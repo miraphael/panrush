@@ -56,10 +56,10 @@ def main():
     size = os.path.getsize(SRC_FILE)
     print(f"[1] 源文件 {size/1048576:.0f} MB, sha256={src_hash[:16]}…")
 
-    dest = os.path.join(DL_DIR, "testdata.bin")
-    if os.path.exists(dest):
-        os.remove(dest)
+    import shutil
+    shutil.rmtree(DL_DIR, ignore_errors=True)  # 清掉上轮残留，保证冲突改名断言可复现
     os.makedirs(DL_DIR, exist_ok=True)
+    dest = os.path.join(DL_DIR, "testdata.bin")
 
     print("[2] 创建任务（分段下载）")
     t = api("/api/download/url", {"url": "http://127.0.0.1:8765/testdata.bin", "dest_dir": DL_DIR})
