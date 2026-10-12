@@ -107,7 +107,13 @@ def _filename_from_headers(headers: dict, url: str) -> str:
     cd = headers.get("content-disposition", "")
     m = re.search(r"filename\*=UTF-8''([^;]+)", cd) or re.search(r'filename="?([^";]+)"?', cd)
     if m:
-        return _sanitize(unquote(m.group(1)))
+        name = unquote(m.group(1))
+        if "\ufffd" in name:  # 服务端发的是 GBK 编码文件名，UTF-8 解出替换符时降级重解
+            try:
+                name = unquote(m.group(1), encoding="gbk")
+            except Exception:
+                pass
+        return _sanitize(name)
     path = unquote(urlparse(url).path)
     return _sanitize(os.path.basename(path) or "download.bin")
 

@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 import secrets
 import sys
 import time
@@ -126,7 +127,7 @@ async def browse(provider: str, path: str = "", refresh: int = 0):
     p = providers.get(provider)
     if not p:
         raise HTTPException(404, "provider 不存在")
-    if not p.cred_saved():
+    if p.cred_fields and not p.cred_saved():
         raise HTTPException(400, f"{p.name} 未配置凭据")
     key = (provider, path or p.root)
     ts, cached = _fs_cache.get(key, (0.0, None))
@@ -170,10 +171,18 @@ async def create_task(body: TaskBody, request: Request):
     return t.to_api()
 
 
+LANZOU_RE = re.compile(r"^https?://[^/]*(lanzou[a-z]?|lanzn|lanpv|lanpw|lanrw|lanvf|ilanli)\.[a-z.]+/", re.I)
+
+
 @app.post("/api/download/url")
 async def download_url(body: UrlBody, request: Request):
     if not body.url.startswith(("http://", "https://")):
-        raise HTTPException(400, "仅支持 http(s) 直链")
+        raise HTTPException(400, "仅支持 http(s) 链接")
+    # 智能路由：网盘分享链接自动交给对应驱动（目前支持蓝奏云免登录直取）
+    if LANZOU_RE.match(body.url):
+        t = engine.create("lanzou", body.url, body.filename or "download.bin", -1,
+                          body.dest_dir or "")
+        return t.to_api()
     name = body.filename or os.path.basename(body.url.split("?")[0]) or "download.bin"
     t = engine.create("direct", body.url, name, -1, body.dest_dir or "")
     return t.to_api()
