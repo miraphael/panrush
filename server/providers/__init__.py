@@ -41,6 +41,7 @@ def _create_all(cred_store) -> dict:
     from . import dropbox as _db  # noqa: F401
     from . import lanzou as _lz  # noqa: F401
     from . import pan123share as _p1s  # noqa: F401
+    from . import quarkshare as _qks  # noqa: F401
 
     return {pid: cls(cred_store) for pid, cls in REGISTRY.items()}
 

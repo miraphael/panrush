@@ -127,7 +127,7 @@ async def browse(provider: str, path: str = "", refresh: int = 0):
     p = providers.get(provider)
     if not p:
         raise HTTPException(404, "provider 不存在")
-    if p.cred_fields and not p.cred_saved():
+    if p.cred_fields and not p.cred_optional and not p.cred_saved():
         raise HTTPException(400, f"{p.name} 未配置凭据")
     key = (provider, path or p.root)
     ts, cached = _fs_cache.get(key, (0.0, None))
@@ -176,6 +176,14 @@ LANZOU_RE = re.compile(r"^https?://[^/]*(lanzou[a-z]?|lanzn|lanpv|lanpw|lanrw|la
 PAN123_SHARE_RE = re.compile(
     r"^https?://(?:[a-z0-9\-]+\.)*(?:123pan|123278|123865|123684|123295|123912)\.(?:com|cn)/(?:s|web)/",
     re.I)
+# 夸克网盘分享链接
+QUARK_SHARE_RE = re.compile(r"^https?://(?:[a-z0-9\-]+\.)*quark\.cn/s/", re.I)
+
+# 分享链接 → (驱动 id, 说明)；前端收到 kind=share 后会切到该盘的浏览视图
+SHARE_ROUTES = [
+    (QUARK_SHARE_RE, "quarkshare"),
+    (PAN123_SHARE_RE, "pan123share"),
+]
 
 
 @app.post("/api/download/url")
@@ -183,10 +191,11 @@ async def download_url(body: UrlBody, request: Request):
     if not body.url.startswith(("http://", "https://")):
         raise HTTPException(400, "仅支持 http(s) 链接")
     # 智能路由：网盘分享链接自动交给对应驱动
-    if PAN123_SHARE_RE.match(body.url):
-        # 123 云盘分享可能是文件夹，交给前端切到浏览视图由用户自己挑
-        return {"kind": "share", "provider": "pan123share", "path": body.url,
-                "name": providers["pan123share"].name}
+    for pattern, pid in SHARE_ROUTES:
+        if pattern.match(body.url):
+            # 分享可能是文件夹，交给前端切到浏览视图由用户自己挑
+            return {"kind": "share", "provider": pid, "path": body.url,
+                    "name": providers[pid].name}
     if LANZOU_RE.match(body.url):
         t = engine.create("lanzou", body.url, body.filename or "download.bin", -1,
                           body.dest_dir or "")

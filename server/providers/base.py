@@ -29,6 +29,7 @@ class PanProvider:
     tier: str = "experimental"    # full(满速) / limited(受限) / experimental
     root: str = "0"
     cred_fields: list = []        # [{key,label,placeholder,secret}]
+    cred_optional: bool = False   # True = 凭据可选（分享直取类：没配也能用）
     help: str = ""
 
     def __init__(self, cred_store):
@@ -37,10 +38,10 @@ class PanProvider:
     # 凭据
     @property
     def cred(self) -> dict | None:
-        return self.cred_store.get(self.id)
+        return self.cred_store.get(self.id) if self.cred_store else None
 
     def cred_saved(self) -> bool:
-        return self.cred_store.has(self.id)
+        return bool(self.cred_store) and self.cred_store.has(self.id)
 
     async def login(self, cred: dict) -> dict:
         """校验凭据；可在这里换取/缓存 token。校验失败抛 PanError。"""
