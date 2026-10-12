@@ -40,7 +40,7 @@
 | Google Drive | 官方 OAuth | ✅ 满速 | ✅ 可用 |
 | Dropbox | 官方 OAuth | ✅ 满速 | ✅ 可用 |
 | 天翼云盘 | Web API (Cookie) | ✅ 满速 | 🧪 待真机验证 |
-| 蓝奏云(分享直取) | 免登录解析分享链接 | ✅ 满速 | ✅ 可用（2026 新版 CDN 行为验证自动过，需 Playwright） |
+| 蓝奏云(分享直取) | 免登录解析分享链接 | ✅ 满速 | ✅ 可用（CDN 反爬需要真 Chromium，完整版已内嵌） |
 | 百度网盘 | 开放平台 | ⚠️ 随账号会员等级 | 骨架就绪 |
 | MEGA / 迅雷 / UC / 115 | — | — | 🗺️ Roadmap（加密/签名类，需专项） |
 
@@ -49,12 +49,19 @@
 > **关于状态标记**：✅ = 已实现；🧪 = 已实现但还没在真实账号上跑过，可能有接口出入；驱动跑不通时开 issue 附日志即可，修起来都是小改动。
 >
 > **关于分享直取**：分享链接的下载权在分享方手上——123 云盘对免费分享有「提取流量包」，分享方额度耗尽时（接口返回 5112）谁都下不了，这不是工具能绕过的；夸克对未登录访客的单文件下载有约 50MB 的体积上限，超了就得登录转存（配一次 Cookie 即可自动处理）。带提取码的分享把链接连 `?pwd=xxxx` 一起粘贴即可。
+>
+> **关于蓝奏云**：蓝奏云在 2026 年把分享页的变量名和 CDN 的下载验证都换了一轮，已经跟上了。要注意的是它的 CDN 反爬**认内核**：实测系统自带的 Edge 能启动但会卡在挑战页，Playwright 自带的 Chromium 才能过——所以蓝奏云这一步需要完整版 exe（已内嵌 Chromium），或在本机执行过 `playwright install chromium`。
 
 ## 🚀 快速开始
 
 **方式一：绿色版 exe（Windows，推荐）**
 
-从 [Releases](https://github.com/miraphael/panrush/releases) 下载 `PanRush.exe`，双击即用（自动打开浏览器，数据保存在 exe 同目录）。
+从 [Releases](https://github.com/miraphael/panrush/releases) 下载 `PanRush.exe`，双击即用（自动打开浏览器）。
+
+- **完全独立**：exe 里已经打进了运行所需的一切——Python 运行时、Web UI、连蓝奏云要用的无头浏览器也在里面，不需要另外装任何东西。
+- **数据自愈**：配置和任务库默认放在 exe 同目录；如果放在 `C:\Program Files` 这类写不了的位置，会自动改存到 `%LOCALAPPDATA%\PanRush`。
+- **重复双击**：已经在跑的时候再双击，不会报错也不会抢端口，直接给你打开界面。
+- 首次启动会把内嵌的浏览器释放到磁盘（一次性，之后启动不再解压）。
 
 **方式二：源码运行**
 
@@ -75,10 +82,15 @@ http://127.0.0.1:18400
 ### 自行打包 exe
 
 ```bash
-pip install pyinstaller
-pyinstaller --onefile --noconsole --name PanRush --add-data "web;web" run_exe.py
-# 产物在 dist/PanRush.exe
+pip install -r requirements.txt pyinstaller
+python build_exe.py            # 完整版：内嵌无头浏览器，完全独立（体积大）
+python build_exe.py --lite     # 轻量版：不内嵌浏览器，运行时用系统 Edge / Chrome
+# 产物在 dist/PanRush.exe，脚本同时会复制一份到项目上级目录并带上版本号
 ```
+
+> 打包脚本会自动生成应用图标和 Windows 版本信息。完整版会把 Playwright 的
+> `chrome-headless-shell` 一起打进去；程序启动时释放到 exe 旁的 `browsers/` 目录并复用。
+> 轻量版启动更快、体积小得多，代价是蓝奏云那一步要靠系统浏览器（Windows 10/11 自带 Edge）。
 
 ## 🏗️ 架构
 

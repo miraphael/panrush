@@ -28,17 +28,15 @@ from .cred_store import CredStore
 from .dav import DavApp
 from .engine.downloader import Engine
 from .engine.task_store import TaskStore
+from .paths import app_dir, config_path, data_dir, resource_dir
 from .providers import HTTP, HTTP_NO_REDIRECT, PanError, _create_all
 from .providers.base import FileEntry
 
-# 冻结模式(PyInstaller)：数据/配置放 exe 旁边，web 资源在包内 _MEIPASS
-if getattr(sys, "frozen", False):
-    APP_DIR = os.path.dirname(os.path.abspath(sys.executable))
-    WEB_DIR = os.path.join(getattr(sys, "_MEIPASS", APP_DIR), "web")
-else:
-    APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    WEB_DIR = os.path.join(APP_DIR, "web")
-DATA_DIR = os.path.join(APP_DIR, "data")
+# 冻结模式(PyInstaller)：数据/配置放 exe 旁边（只读目录时自动退到 %LOCALAPPDATA%），
+# web 资源在包内 _MEIPASS
+APP_DIR = app_dir()
+WEB_DIR = os.path.join(resource_dir(), "web")
+DATA_DIR = data_dir()
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # 日志：滚动文件 + 控制台
@@ -52,7 +50,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
-config = Config(os.path.join(APP_DIR, "config.json"))
+config = Config(config_path())
 cred_store = CredStore(os.path.join(DATA_DIR, "panrush.db"))
 providers = _create_all(cred_store)
 task_store = TaskStore(os.path.join(DATA_DIR, "panrush.db"))
