@@ -172,13 +172,21 @@ async def create_task(body: TaskBody, request: Request):
 
 
 LANZOU_RE = re.compile(r"^https?://[^/]*(lanzou[a-z]?|lanzn|lanpv|lanpw|lanrw|lanvf|ilanli)\.[a-z.]+/", re.I)
+# 123 云盘分享链接（多个镜像域名 + 短链 /s/ /web/）
+PAN123_SHARE_RE = re.compile(
+    r"^https?://(?:[a-z0-9\-]+\.)*(?:123pan|123278|123865|123684|123295|123912)\.(?:com|cn)/(?:s|web)/",
+    re.I)
 
 
 @app.post("/api/download/url")
 async def download_url(body: UrlBody, request: Request):
     if not body.url.startswith(("http://", "https://")):
         raise HTTPException(400, "仅支持 http(s) 链接")
-    # 智能路由：网盘分享链接自动交给对应驱动（目前支持蓝奏云免登录直取）
+    # 智能路由：网盘分享链接自动交给对应驱动
+    if PAN123_SHARE_RE.match(body.url):
+        # 123 云盘分享可能是文件夹，交给前端切到浏览视图由用户自己挑
+        return {"kind": "share", "provider": "pan123share", "path": body.url,
+                "name": providers["pan123share"].name}
     if LANZOU_RE.match(body.url):
         t = engine.create("lanzou", body.url, body.filename or "download.bin", -1,
                           body.dest_dir or "")

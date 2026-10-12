@@ -156,7 +156,28 @@ async function openProvider(p) {
   $("#welcome").classList.add("hidden");
   $("#file-panel").classList.remove("hidden");
   $("#gsearch").value = "";
+  if (!p.root) {          // 分享直取类驱动：没有默认根目录，等用户粘贴分享链接
+    $("#batch-dl").classList.add("hidden");
+    $("#breadcrumb").innerHTML = `<a>${escapeHtml(p.name)}</a>`;
+    $("#file-list").innerHTML =
+      `<tr><td colspan="4" class="empty">把网盘分享链接粘贴到顶部输入框，即可浏览 / 下载</td></tr>`;
+    return;
+  }
   await browse(p.root);
+}
+
+/* 分享链接解析后，直接切到该盘的浏览视图并定位到分享内容 */
+async function openSharePath(providerId, path) {
+  const p = providers.find(x => x.id === providerId);
+  if (!p) return;
+  current = p; currentPath = null; crumbs.length = 0;
+  document.querySelectorAll(".pcard").forEach(c =>
+    c.classList.toggle("active", c.dataset.pid === p.id));
+  $("#cred-panel").classList.add("hidden");
+  $("#welcome").classList.add("hidden");
+  $("#file-panel").classList.remove("hidden");
+  $("#gsearch").value = "";
+  await browse(path);
 }
 
 let selected = new Set();   // 批量下载：当前目录勾选的文件 fsid
@@ -353,11 +374,15 @@ async function quickDownload() {
   const url = $("#quick-url").value.trim();
   if (!url) return;
   try {
-    await api("/api/download/url", {
+    const r = await api("/api/download/url", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, dest_dir: $("#cfg-dest").value.trim() }),
     });
     $("#quick-url").value = "";
+    if (r && r.kind === "share") {      // 分享链接 → 切到浏览视图让用户挑
+      await openSharePath(r.provider, r.path);
+      return;
+    }
     pollTasks();
   } catch (err) { alert("失败：" + err.message); }
 }
